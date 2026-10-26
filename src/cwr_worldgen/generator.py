@@ -1326,6 +1326,11 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
                 ways_path, dataset, projection,
                 include_minor_roads=spec.include_minor_roads,
                 surface_textures=STOCK_WAY_TEXTURES,
+                bridge_objects=tuple(
+                    obj for obj in generated.objects[generated.road_objects:]
+                    if obj.model_path.replace("/", "\").casefold()
+                    == r"o\hous\most_stred30.p3d"
+                ),
             ),
             "omitted_legacy_road_objects": generated.road_objects,
         }
@@ -4984,6 +4989,11 @@ def build_milestone4(
                 include_minor_roads=spec.include_minor_roads,
                 surface_textures=way_textures,
                 surface_donors=native_way_donors,
+                bridge_objects=tuple(
+                    obj for obj in nonroads.objects
+                    if obj.model_path.replace("/", "\").casefold()
+                    == r"o\hous\most_stred30.p3d"
+                ),
             ),
             "surface_textures": way_textures,
             "surface_donors": native_way_donors,
