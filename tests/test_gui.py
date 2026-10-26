@@ -635,6 +635,48 @@ class GuiCommandTests(unittest.TestCase):
         self.assertNotIn("--no-steep-hill-bushes", command)
         self.assertNotIn("--no-wetland-reeds", command)
 
+    def test_game_profile_is_remembered_and_restored(self) -> None:
+        class _Choice:
+            def __init__(self, value: str) -> None:
+                self.value = value
+                self.callback = None
+
+            def get(self) -> str:
+                return self.value
+
+            def set(self, value: str) -> None:
+                self.value = value
+                if self.callback is not None:
+                    self.callback()
+
+            def trace_add(self, mode: str, callback) -> None:
+                assert mode == "write"
+                self.callback = callback
+
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "gui-state.json"
+            gui = object.__new__(WorldgenGui)
+            gui.state_path = path
+            selection = _Choice("cwa")
+            gui.vars = {"profile": selection}
+            WorldgenGui._install_game_profile_persistence(gui)
+            selection.set("cwr-ce-ways")
+            self.assertEqual(load_gui_state(path)["profile"], "cwr-ce-ways")
+            restored = defaults_with_recent_source(
+                default_gui_values(), load_gui_state(path),
+            )
+            self.assertEqual(restored["profile"], "cwr-ce-ways")
+            self.assertIn("cwr-ce-ways", build_milestone9_command(
+                restored, python="python",
+            ))
+            selection.set("cwr-ce")
+            self.assertEqual(load_gui_state(path)["profile"], "cwr-ce")
+
+    def test_game_profile_ignores_corrupt_or_obsolete_state(self) -> None:
+        for state in ({}, {"profile": "not-a-profile"}, {"profile": 19}):
+            restored = defaults_with_recent_source(default_gui_values(), state)
+            self.assertEqual(restored["profile"], "cwa")
+
     def test_gui_state_restores_road_donors_between_restarts(self) -> None:
         defaults = defaults_with_recent_source(
             default_gui_values(),
