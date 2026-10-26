@@ -56,7 +56,7 @@ def _cover_lengths(distance: float) -> list[tuple[float, str]]:
                 coverage = 25 * long_count + 12 * medium_count + 6 * short_count
                 shortfall = max(0.0, distance - coverage)
                 excess = max(0.0, coverage - distance)
-                if shortfall > 0.5 or excess > 3.0:
+                if shortfall > 0.5 or excess > 6.0:
                     continue
                 ranking = (round(excess + shortfall * 2.0, 4),
                            count, -long_count)
@@ -99,7 +99,7 @@ def bridge_road_surface_covers(
     All output placements are deterministic and separate from legacy road_fit.
     """
     bridges = tuple(bridge_objects)
-    if not bridges or not elevations:
+    if not bridges or len(elevations) == 0:
         return ()
     covers: list[WorldObject] = []
     next_id = starting_id
