@@ -147,6 +147,17 @@ profile and require the isolated CWR-CE engine branch or a build containing it.
   the banks. There is a 0.7 m intentional overlap into the bridge deck to
   conceal the visual seam, without overlaying native roads along the deck.
   Bridge models are retained in the WRP and the PBO.
+
+  If final solved terrain rises above the bridge's visible road deck at an
+  abutment, Worldgen also fits a **short elevated stock asphalt P3D cover**
+  (from available `O\road\sil25.p3d`, `sil12.p3d` and `sil6.p3d`)
+  over the buried end. It samples the finished terrain under the full road
+  width, sets the model's road surface above the grass, slopes it toward the
+  bridge deck and blends about 6 metres onto the dry native road and 4 metres
+  onto visible stock roadway. Fully clear bridge ends get no duplicate road
+  models. The same fitted stock P3Ds are included in the final WRP while
+  ordinary terrain roads remain entirely native `.ways`.
+  The manifest reports `road_ways.buried_bridge_road_covers`.
 - **Unsupported bridge spans remain excluded.** If no stock bridge module can
   be matched to a bridge-tagged OSM road, the exporter does not guess an
   elevated deck or draw a submerged road. Check the build manifest's
