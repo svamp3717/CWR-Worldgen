@@ -759,3 +759,41 @@ def test_unrelated_bridge_or_missing_stock_deck_does_not_create_water_road(tmp_p
         )
         assert info["restored_bridge_approach_ways"] == 0
         assert len(ways) == 0
+
+
+
+def test_two_connected_bridge_modules_have_only_two_bank_roads(tmp_path):
+    feature = OsmLineFeature(
+        "way/bridge", {"highway": "tertiary", "bridge": "yes"},
+        (_ll(100, 400), _ll(800, 400)),
+    )
+    spacing = 50.190284729003906
+    bridges = (_stock_bridge(x=400), _stock_bridge(x=400 + spacing))
+    info, nodes, ways, _ = _export(
+        tmp_path, [feature], world_size=1000, bridge_objects=bridges,
+    )
+    assert info["stock_bridge_modules"] == 2
+    assert info["restored_bridge_approach_ways"] == 2
+    assert len(ways) == 2
+    left, right = (_way_points(nodes, ways[0]),
+                   _way_points(nodes, ways[1]))
+    assert left[0] == (100, 400)
+    assert right[-1] == (800, 400)
+    assert 374 < left[-1][0] < 378
+    assert 472 < right[0][0] < 477
+    # No third native road segment is added over the seam of stock modules.
+    assert all(not 385 < x < 465 for x, z in left + right)
+
+
+def test_alternative_bridge_tags_receive_bank_connections(tmp_path):
+    for bridge_tags in ({"man_made": "bridge"}, {"special": "bridge"}):
+        feature = OsmLineFeature(
+            "way/bridge", {"highway": "tertiary", **bridge_tags},
+            (_ll(100, 400), _ll(700, 400)),
+        )
+        info, nodes, ways, _ = _export(
+            tmp_path, [feature], world_size=1000,
+            bridge_objects=(_stock_bridge(),),
+        )
+        assert info["restored_bridge_approach_ways"] == 2
+        assert len(ways) == 2
