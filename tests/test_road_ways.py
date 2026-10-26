@@ -452,3 +452,77 @@ def test_tunnel_approach_is_not_rounded_or_merged_across(tmp_path):
     assert info["ways"] == 1
     assert info["smoothed_rural_bends"] == 0
     assert (400, 200) in _way_points(nodes, ways[0])
+
+
+
+def test_native_ways_remove_unused_generated_road_p3ds_but_keep_other_assets(tmp_path):
+    from cwr_worldgen.generator import _prune_unused_native_way_road_assets
+    source = tmp_path / "source" / "world"
+    infrastructure = source / "i"
+    infrastructure.mkdir(parents=True)
+    road_models = (
+        "gravel25.p3d",
+        "gravel_j3.p3d",
+        "road_paved_w060_l0250.p3d",
+        "road_j3_dirt_w060_h000_090_180.p3d",
+    )
+    retained_bridge = "br_span_w030_l0250.p3d"
+    retained_other = "rock_rock_w020_l020.p3d"
+    for name in (*road_models, retained_bridge, retained_other):
+        (infrastructure / name).write_bytes(b"test")
+    for name in ("g.paa", "gj.paa", "dt.paa", "pv.paa", "ge.paa",
+                 "gravel-source-surfaces.txt"):
+        (infrastructure / name).write_bytes(b"old")
+    (infrastructure / "b.paa").write_bytes(b"needed for bridge")
+
+    removed = _prune_unused_native_way_road_assets(source, "world", ())
+    assert all(not (infrastructure / name).exists() for name in road_models)
+    assert all(not (infrastructure / name).exists()
+               for name in ("g.paa", "gj.paa", "dt.paa", "pv.paa",
+                            "ge.paa", "gravel-source-surfaces.txt"))
+    assert (infrastructure / retained_bridge).is_file()
+    assert (infrastructure / retained_other).is_file()
+    assert (infrastructure / "b.paa").is_file()
+    assert "i/gravel25.p3d" in removed
+    assert _prune_unused_native_way_road_assets(source, "world", ()) == ()
+
+
+def test_native_ways_keep_generated_road_models_actually_placed_by_nonroads(tmp_path):
+    from cwr_worldgen.generator import _prune_unused_native_way_road_assets
+    source = tmp_path / "source" / "world"
+    infrastructure = source / "i"
+    infrastructure.mkdir(parents=True)
+    (infrastructure / "gravel25.p3d").write_bytes(b"required")
+    (infrastructure / "gravel12.p3d").write_bytes(b"unused")
+    (infrastructure / "g.paa").write_bytes(b"keep material")
+    removed = _prune_unused_native_way_road_assets(
+        source, "world", (r"world\i\gravel25.p3d",),
+    )
+    assert (infrastructure / "gravel25.p3d").is_file()
+    assert (infrastructure / "g.paa").is_file()
+    assert not (infrastructure / "gravel12.p3d").exists()
+    assert removed == ("i/gravel12.p3d",)
+
+
+def test_native_pbo_layout_rejects_unreferenced_generated_road_p3ds(tmp_path):
+    from cwr_worldgen.generator import _verify_single_world_pbo_layout
+    from cwr_worldgen.pbo import pack_directory
+    src = tmp_path / "world"
+    (src / "i").mkdir(parents=True)
+    (src / "config.cpp").write_text("class CfgWorlds {};")
+    (src / "world.wrp").write_bytes(b"4WVR" + b"\0" * 24)
+    (src / "world.ways").write_text("node 1 1 1\nnode 2 2 2\n"
+                                    r"way 1 6 o\road\sil_new.paa 1 2" + "\n")
+    (src / "i" / "gravel25.p3d").write_bytes(b"old unused road")
+    (src / "i" / "br_span_w030_l0250.p3d").write_bytes(b"needed bridge")
+    pbo = tmp_path / "world.pbo"
+    pack_directory(src, pbo, backend="python")
+    with pytest.raises(RuntimeError, match="unused generated road P3Ds"):
+        _verify_single_world_pbo_layout(
+            pbo, "world", None, include_ways=True,
+        )
+    (src / "i" / "gravel25.p3d").unlink()
+    pack_directory(src, pbo, backend="python")
+    assert _verify_single_world_pbo_layout(
+        pbo, "world", None, include_ways=True,
+    )["verified"]
