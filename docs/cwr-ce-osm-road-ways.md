@@ -43,7 +43,7 @@ boundaries. Two ways are joinable only when their projected endpoint coordinates
 match exactly, they have the same output width (to 0.001 m) and surface
 material, and the shared point is not a branch or mapped interior crossing.
 Nearby but distinct endpoints are *not* snapped, so the merge never creates
-new connectivity. Junctions, bridges, width/material transitions, and loops
+new connectivity. Junctions, bridge/tunnel approaches, width/material transitions, and loops
 remain protected. The engine's existing 512-node output chunking still applies
 to long merged chains.
 
@@ -57,7 +57,7 @@ existing terrain-grading corridor.
 
 The same cautious clearance checks remain: no smoothing at shared junctions,
 inside or near towns and residential areas, or when the changed road ribbon
-would touch buildings, other roads, bridge approaches, water/watercourses,
+would touch buildings, other roads, bridge or tunnel approaches, water/watercourses,
 or the terrain boundary. Endpoints are always preserved. Although curves
 appear more natural, the generator still fits/grades terrain against the
 original OSM source, so verify steep mountain roads in-game.
