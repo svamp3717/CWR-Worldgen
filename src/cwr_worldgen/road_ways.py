@@ -32,6 +32,15 @@ _MAX_LINE = 8192
 _MAX_NODES_PER_WAY = 512  # comfortably below the engine's 4096-node limit
 _COORD_DECIMALS = 4
 
+# These three real stock CWA skins trigger the isolated engine's matching
+# sil25/ces25/asf25 donor UV and lighting fallback. Older data\*.pac guesses
+# do not opt into the same material handling.
+STOCK_WAY_TEXTURES = {
+    "paved": r"o\road\sil_new.paa",
+    "dirt": r"o\road\ces_hned.paa",
+    "gravel": r"o\road\asf_new.paa",
+}
+
 
 def is_osm_ways_profile(profile: str) -> bool:
     return profile == "cwr-ce-ways"
