@@ -209,8 +209,10 @@ Select **Game profile: cwr-ce-ways** in the GUI or pass
 [CWR-CE's isolated OSM-style road ways feature branch](https://github.com/svamp3717/CWR-CE/tree/feature/osm-style-road-ways-isolated).
 Worldgen writes a `<world>.ways` sidecar beside the WRP and packages it into
 the world PBO. Compatible road ways are merged into longer chains and rural
-corners gain adaptive, clearance-aware curves. Each chain uses shared road
-nodes and either a resolved P3D road-material donor (preserving UVs, lighting,
+corners gain adaptive, clearance-aware curves. Long rural straights can
+also become gentle, deterministic S-curves when there is enough open space,
+without moving junctions, modeled bridge/tunnel approaches or urban roads.
+Each chain uses shared road nodes and either a resolved P3D road-material donor (preserving UVs, lighting,
 and roadway contact) or a stock-matched texture fallback instead of thousands
 of legacy road P3Ds. Terrain grading and building clearance still use fitted
 road geometry. The existing `cwa` and
