@@ -32,11 +32,11 @@ def _export(tmp_path, roads, *, include_minor=True, world_size=100.0,
     lines = path.read_text(encoding="utf-8").splitlines()
     nodes = {
         int(parts[1]): (float(parts[2]), float(parts[3]))
-        for line in lines if (parts := line.split())[0] == "node"
+        for line in lines if (parts := line.split()) and parts[0] == "node"
     }
     ways = [
         (int(parts[1]), float(parts[2]), parts[3], [int(node) for node in parts[4:]])
-        for line in lines if (parts := line.split())[0] == "way"
+        for line in lines if (parts := line.split()) and parts[0] == "way"
     ]
     return info, nodes, ways, path.read_bytes()
 
