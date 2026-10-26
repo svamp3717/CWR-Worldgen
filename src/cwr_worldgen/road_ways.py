@@ -399,7 +399,13 @@ def _round_rural_bends(
         # radius grows on long open roads and shrinks on slower/short roads.
         half_angle = math.radians(angle) * 0.5
         tangent_of_half = math.tan(half_angle)
-        desired = max(12.0, 10.0 + _MIN_CURVE_RADIUS_METRES * tangent_of_half)
+        # Give long open roads a wider flowing sweep; short approaches keep
+        # a tight trim or their original bend when no safe radius fits.
+        desired = max(
+            12.0,
+            8.0 + min(before, after) * 0.12
+            + _MIN_CURVE_RADIUS_METRES * tangent_of_half,
+        )
         tangent = min(_MAX_TANGENT_METRES, desired, before * 0.38, after * 0.38)
         radius = tangent / tangent_of_half
         if radius < _MIN_CURVE_RADIUS_METRES:
