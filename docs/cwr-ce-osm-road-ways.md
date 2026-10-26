@@ -137,10 +137,22 @@ profile and require the isolated CWR-CE engine branch or a build containing it.
 
 ## Current limitations
 
-- **Bridges and tunnels** are not exported as native ways. CWR-CE's ribbon
-  follows the terrain, so elevated or underground routes need separate models.
-  Existing non-road bridge assets are retained; bridge approaches may require
-  manual road connection work.
+- **Bridges use a hybrid roadway.** The elevated, drivable stock bridge
+  P3D supplies its own Roadway LOD over the water; a terrain-following
+  native .ways ribbon must *not* be drawn on the water underneath. Worldgen
+  now measures the *placed stock bridge's actual deck endpoints* (including
+  object pitch) and splits OSM bridge-tagged roads at those endpoints.
+  The dry approach at **each side of the bridge is exported as a native
+  road** even when the OSM bridge=yes way continues hundreds of metres onto
+  the banks. There is a 0.7 m intentional overlap into the bridge deck to
+  conceal the visual seam, without overlaying native roads along the deck.
+  Bridge models are retained in the WRP and the PBO.
+- **Unsupported bridge spans remain excluded.** If no stock bridge module can
+  be matched to a bridge-tagged OSM road, the exporter does not guess an
+  elevated deck or draw a submerged road. Check the build manifest's
+  `road_ways.unmatched_bridge_features` count. The output also reports
+  `road_ways.restored_bridge_approach_ways` and `road_ways.stock_bridge_modules`.
+  Tunnel roads are still not supported by the terrain-following exporter.
 - Shared junctions are inferred from coincident **normalized/projection**
   coordinates. Paths that nearly meet but have distinct vertices are not
   artificially connected. For complicated crossings, inspect the resulting
