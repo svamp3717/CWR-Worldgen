@@ -4029,6 +4029,57 @@ def _road_object_fingerprint(objects: Sequence[object]) -> str:
     )
 
 
+def _is_generated_road_p3d(model_path: str) -> bool:
+    """Recognize generated road-only P3Ds, not bridges/other infrastructure."""
+    return any(check(model_path) for check in (
+        is_generated_paved_road_model,
+        is_generated_gravel_road_model,
+        is_generated_dirt_road_model,
+        is_generated_paved_junction_model,
+        is_generated_gravel_junction_model,
+        is_generated_dirt_junction_model,
+    ))
+
+
+def _prune_unused_native_way_road_assets(
+    source_dir: Path,
+    world_name: str,
+    retained_model_paths: Sequence[str],
+) -> tuple[str, ...]:
+    """Remove road P3Ds left by prior builds but absent from the native WRP.
+
+    Keep generated bridge, barrier, utility and rock assets. A retained road
+    object from a non-road placement is also preserved if still referenced.
+    This is necessary for --keep-output: packing includes every source file.
+    """
+    infrastructure_dir = source_dir / "i"
+    if not infrastructure_dir.is_dir():
+        return ()
+    required = {
+        model.replace("/", "\\").casefold()
+        for model in retained_model_paths
+    }
+    removed: list[str] = []
+    for candidate in sorted(infrastructure_dir.glob("*.p3d")):
+        model = f"{world_name}\\i\\{candidate.name}".casefold()
+        if _is_generated_road_p3d(model) and model not in required:
+            candidate.unlink()
+            removed.append(f"i/{candidate.name}")
+
+    # All native roads use the .ways sidecar. No unused generated road-only
+    # texture or old procedural road-source metadata should be repacked.
+    if not any(_is_generated_road_p3d(model) for model in required):
+        for name in (
+            "g.paa", "gj.paa", "ge.paa", "dt.paa", "pv.paa",
+            "gravel-source-surfaces.txt",
+        ):
+            candidate = infrastructure_dir / name
+            if candidate.is_file():
+                candidate.unlink()
+                removed.append(f"i/{name}")
+    return tuple(removed)
+
+
 def _verify_single_world_pbo_layout(
     pbo_path: Path,
     world_name: str,
@@ -4064,10 +4115,21 @@ def _verify_single_world_pbo_layout(
             "world PBO is missing generated runtime entries: " + ", ".join(missing)
         )
 
-    generated_road_models = tuple(
-        entry for entry in canonical_expected
-        if entry.casefold().startswith("i\\gravel") and entry.casefold().endswith(".p3d")
-    )
+    generated_road_models = tuple(sorted(
+        entry for entry in archive_entries
+        if entry.startswith("i\\") and _is_generated_road_p3d(entry)
+    ))
+    if include_ways:
+        referenced = {
+            name.replace("/", "\\").casefold()
+            for name in (infrastructure_generation.model_files if infrastructure_generation else ())
+        }
+        unused = tuple(entry for entry in generated_road_models if entry not in referenced)
+        if unused:
+            raise RuntimeError(
+                "native .ways PBO still includes unused generated road P3Ds: "
+                + ", ".join(unused)
+            )
     gravel_texture_entries = {
         rf"i\{_texture_file_stem('gravel')}.paa".casefold(),
         rf"i\{_texture_file_stem('gravel_edge')}.paa".casefold(),
@@ -4432,7 +4494,10 @@ def build_milestone4(
     combined_model_usage: Counter[str] = Counter(dict(nonroads.model_usage))
     # Roads and semantic objects are much smaller populations than dense forest/
     # placement output. Scan each once, then use the aggregate everywhere else.
-    combined_model_usage.update(obj.model_path for obj in road_fit.objects)
+    # Native .ways roads still fit temporary P3Ds for grading/clearance,
+    # but those objects are NOT in the final WRP and must not generate assets.
+    if not is_osm_ways_profile(spec.profile):
+        combined_model_usage.update(obj.model_path for obj in road_fit.objects)
     combined_model_usage.update(obj.model_path for obj in semantic.objects)
     combined_model_usage.update(obj.model_path for obj in nogova_clutter)
     generated = ObjectGenerationResult(
@@ -4868,6 +4933,9 @@ def build_milestone4(
     ways_path = source_dir / f"{spec.name}.ways"
     ways_report: dict[str, object] = {"enabled": False}
     if is_osm_ways_profile(spec.profile):
+        pruned_road_assets = _prune_unused_native_way_road_assets(
+            source_dir, spec.name, tuple(combined_model_usage),
+        )
         # A texture-only way uses that texture for BOTH appearance and
         # wheel contacts. Use the visual face rather than the Roadway LOD
         # texture, which can be untextured or have different artwork.
@@ -4888,6 +4956,7 @@ def build_milestone4(
             ),
             "surface_textures": way_textures,
             "surface_donors": native_way_donors,
+            "pruned_unused_road_assets": list(pruned_road_assets),
             "omitted_legacy_road_objects": len(road_fit.objects),
         }
     else:
