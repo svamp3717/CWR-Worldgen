@@ -488,7 +488,9 @@ def defaults_with_recent_source(
         result["binarize_config"] = state["binarize_config"]
     # Game profile is a GUI preference, not the saved-profile file itself.
     # Reject invalid/stale values rather than passing them into builds.
-    if state.get("profile") in {"cwa", "cwr-ce", "cwr-ce-ways"}:
+    if isinstance(state.get("profile"), str) and state["profile"] in {
+        "cwa", "cwr-ce", "cwr-ce-ways",
+    }:
         result["profile"] = state["profile"]
     if isinstance(state.get("world_seed"), str):
         result["world_seed"] = state["world_seed"]
