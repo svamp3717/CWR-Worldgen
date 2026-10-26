@@ -695,10 +695,7 @@ def _bridge_dry_approach_runs(
         # across perpendicular stock bridges and accidental crossings.
         if hi - lo < max(5.0, axis.length * 0.55):
             continue
-        deck_intervals.append((
-            max(0.0, lo + _BRIDGE_DECK_SEAM_OVERLAP_METRES),
-            min(length, hi - _BRIDGE_DECK_SEAM_OVERLAP_METRES),
-        ))
+        deck_intervals.append((max(0.0, lo), min(length, hi)))
     if not deck_intervals:
         # No rendered bridge deck was matched. Do not put a terrain-following
         # road over possible water, because that would create a submerged road.
@@ -715,7 +712,18 @@ def _bridge_dry_approach_runs(
 
     approaches: list[list[tuple[float, float]]] = []
     cursor = 0.0
-    for lo, hi in (*merged, [length, length]):
+    for raw_lo, raw_hi in (*merged, [length, length]):
+        # Apply the overlap only at the two outer ends of an entire bridge
+        # chain, not once per module: individual stock modules meet at
+        # shared deck joints and must not acquire a tiny native road between.
+        lo = (
+            min(length, raw_lo + _BRIDGE_DECK_SEAM_OVERLAP_METRES)
+            if raw_lo < length else length
+        )
+        hi = (
+            max(0.0, raw_hi - _BRIDGE_DECK_SEAM_OVERLAP_METRES)
+            if raw_hi < length else length
+        )
         if lo - cursor > _BRIDGE_MIN_APPROACH_METRES:
             line = substring(centerline, cursor, lo)
             if isinstance(line, LineString):
