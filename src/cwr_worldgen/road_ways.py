@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from shapely.geometry import LineString, Point, Polygon
+from shapely.ops import substring
 from shapely.strtree import STRtree
 
 from .osm import (
@@ -147,6 +148,10 @@ _MIN_FLOW_LENGTH_METRES = 140.0
 _FLOW_AFTER_CURVE_LENGTH_METRES = 250.0
 _FLOW_SAMPLE_METRES = 12.0
 _MAX_FLOW_OFFSET_METRES = 4.0
+# Let terrain-bound ways reach just under the deck edge to hide visual seams.
+_BRIDGE_DECK_SEAM_OVERLAP_METRES = 0.7
+_BRIDGE_DECK_MATCH_DISTANCE_METRES = 7.0
+_BRIDGE_MIN_APPROACH_METRES = 0.05
 _FLOW_AMPLITUDES_METRES = {
     "secondary": 1.4,
     "tertiary": 2.4,
@@ -651,6 +656,89 @@ def _flow_rural_straights(
     return result, softened
 
 
+def _bridge_dry_approach_runs(
+    run: Sequence[tuple[float, float]],
+    bridge_axes: Sequence[LineString],
+    *,
+    limit: float,
+) -> list[list[tuple[float, float]]]:
+    """Split a bridge-tagged OSM road at the actual stock bridge deck ends.
+
+    The engine's terrain-following .ways must not run over open water, where
+    the elevated stock bridge P3D supplies the Roadway LOD itself. OSM often
+    tags dry roads far beyond the water as bridge=yes; export both dry ends.
+    """
+    centerline = LineString(run)
+    length = centerline.length
+    if length <= _BRIDGE_MIN_APPROACH_METRES:
+        return []
+    deck_intervals: list[tuple[float, float]] = []
+    for axis in bridge_axes:
+        # Distance to both deck endpoints guards against stealing a nearby
+        # unrelated bridge at an intersection or a parallel water crossing.
+        start = Point(axis.coords[0])
+        end = Point(axis.coords[-1])
+        if (
+            centerline.distance(start) > _BRIDGE_DECK_MATCH_DISTANCE_METRES
+            or centerline.distance(end) > _BRIDGE_DECK_MATCH_DISTANCE_METRES
+        ):
+            continue
+        begin = centerline.project(start)
+        finish = centerline.project(end)
+        lo, hi = sorted((begin, finish))
+        # Require appreciable common along-road length to avoid cutting
+        # across perpendicular stock bridges and accidental crossings.
+        if hi - lo < max(5.0, axis.length * 0.55):
+            continue
+        deck_intervals.append((
+            max(0.0, lo + _BRIDGE_DECK_SEAM_OVERLAP_METRES),
+            min(length, hi - _BRIDGE_DECK_SEAM_OVERLAP_METRES),
+        ))
+    if not deck_intervals:
+        # No rendered bridge deck was matched. Do not put a terrain-following
+        # road over possible water, because that would create a submerged road.
+        return []
+    deck_intervals.sort()
+    merged: list[list[float]] = []
+    for lo, hi in deck_intervals:
+        if lo >= hi:
+            continue
+        if merged and lo <= merged[-1][1] + 1.0:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+
+    approaches: list[list[tuple[float, float]]] = []
+    cursor = 0.0
+    for lo, hi in (*merged, [length, length]):
+        if lo - cursor > _BRIDGE_MIN_APPROACH_METRES:
+            line = substring(centerline, cursor, lo)
+            if isinstance(line, LineString):
+                points = [
+                    (round(x, _COORD_DECIMALS), round(z, _COORD_DECIMALS))
+                    for x, z in line.coords
+                ]
+                approaches.extend(_runs(points, limit))
+        cursor = max(cursor, hi)
+    return approaches
+
+
+def _stock_bridge_axes(bridge_objects: Sequence[object]) -> list[LineString]:
+    """Measure the Roadway endpoints, not the stock P3D's object origin."""
+    # Deferred import avoids bridge_render_policy -> generator -> road_ways
+    # initialization cycles. The placement policy also accounts for pitch.
+    from .bridge_render_policy import _axis_endpoints, _is_stock_bridge
+
+    axes = []
+    for obj in bridge_objects:
+        if not _is_stock_bridge(obj):
+            continue
+        ends = _axis_endpoints(obj)
+        if math.dist(*ends) > 5.0:
+            axes.append(LineString(ends))
+    return axes
+
+
 def write_osm_road_ways(
     path: Path,
     dataset: OsmDataset,
@@ -659,6 +747,7 @@ def write_osm_road_ways(
     include_minor_roads: bool,
     surface_textures: Mapping[str, str],
     surface_donors: Mapping[str, str] | None = None,
+    bridge_objects: Sequence[object] = (),
 ) -> dict[str, object]:
     """Export terrain-following non-bridge roads as a deterministic sidecar.
 
@@ -700,18 +789,33 @@ def write_osm_road_ways(
     nodes: dict[tuple[float, float], int] = {}
     lines: list[str] = []
     skipped_elevated = 0
+    bridged_approaches = 0
+    unmatched_bridge_features = 0
+    stock_bridge_axes = _stock_bridge_axes(bridge_objects)
     source_runs: list[tuple[int, Mapping[str, str], float, list[tuple[float, float]]]] = []
     for owner, road in enumerate(sorted(dataset.roads, key=lambda item: item.osm_key)):
         tags = road.tags
         if not road_is_supported(tags, include_minor=include_minor_roads):
             continue
-        # The native ribbon follows terrain; bridges keep their old deck models.
-        if tags.get("bridge", "").strip().casefold() not in {"", "no", "false", "0"}:
-            skipped_elevated += 1
-            continue
+        # Stock bridge P3Ds provide elevated Roadway geometry over water.
+        # OSM bridge=yes often covers long dry approach roads too, so export
+        # those dry ends as native ways right up to the placed deck footprint.
+        # Never synthesize a terrain road across the bridge's wet interior.
+        bridge_tag = _non_ground(tags)
         points = tuple(projection.to_world(point) for point in road.points)
         for run in _runs(points, limit):
-            source_runs.append((owner, tags, _width(tags), run))
+            if bridge_tag:
+                skipped_elevated += 1
+                approaches = _bridge_dry_approach_runs(
+                    run, stock_bridge_axes, limit=limit,
+                )
+                if not approaches:
+                    unmatched_bridge_features += 1
+                bridged_approaches += len(approaches)
+                for approach in approaches:
+                    source_runs.append((owner, tags, _width(tags), approach))
+            else:
+                source_runs.append((owner, tags, _width(tags), run))
 
     original_run_count = len(source_runs)
     # Bridge/tunnel models are not native ribbons; preserve their approaches.
@@ -779,6 +883,9 @@ def write_osm_road_ways(
         "nodes": len(nodes),
         "ways": len(lines),
         "excluded_bridge_features": skipped_elevated,
+        "restored_bridge_approach_ways": bridged_approaches,
+        "unmatched_bridge_features": unmatched_bridge_features,
+        "stock_bridge_modules": len(stock_bridge_axes),
         "smoothed_rural_bends": smoothed_bends,
         "softened_rural_straights": softened_rural_straights,
         "merged_source_runs": original_run_count - len(source_runs),
