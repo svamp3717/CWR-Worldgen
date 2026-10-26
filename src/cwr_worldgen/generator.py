@@ -91,7 +91,7 @@ from .terrain import (
     material_counts,
     material_colour_for_profile,
 )
-from .road_ways import is_osm_ways_profile, write_osm_road_ways
+from .road_ways import STOCK_WAY_TEXTURES, is_osm_ways_profile, write_osm_road_ways
 from .wrp import inspect_rvw4, quantize_elevations, quantize_height, write_rvw4
 from .forest_ground_blends import apply_stock_forest_border_blends
 from .everon_water_blends import apply_everon_water_borders, is_everon_water_blend_path
@@ -1325,11 +1325,7 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
             **write_osm_road_ways(
                 ways_path, dataset, projection,
                 include_minor_roads=spec.include_minor_roads,
-                surface_textures={
-                    "paved": r"data\silnice.pac",
-                    "dirt": r"data\cesta.pac",
-                    "gravel": r"data\asfaltka.pac",
-                },
+                surface_textures=STOCK_WAY_TEXTURES,
             ),
             "omitted_legacy_road_objects": generated.road_objects,
         }
@@ -4603,6 +4599,7 @@ def build_milestone4(
     dirt_texture_path: str | None = None
     road_surface_styles: dict[str, RoadSurfaceStyle] = {}
     road_surface_style_report: dict[str, dict[str, object]] = {}
+    native_way_donors: dict[str, str] = {}
 
     road_texture_donors: dict[str, str] = {}
 
@@ -4647,6 +4644,14 @@ def build_milestone4(
             )
             donor_textures[surface] = texture
             donor_record = road_records.get(canonical_asset_path(donor_model))
+            # The isolated engine can load a mounted P3D as a style donor,
+            # retaining visual UVs, lighting and separate roadway textures.
+            # Never reference a model not found in the configured asset roots.
+            if (
+                donor_record is not None
+                and donor_model.casefold().endswith(".p3d")
+            ):
+                native_way_donors[surface] = donor_model
             donor_bytes: bytes | None = None
             if donor_record is not None:
                 try:
@@ -4863,17 +4868,15 @@ def build_milestone4(
     ways_path = source_dir / f"{spec.name}.ways"
     ways_report: dict[str, object] = {"enabled": False}
     if is_osm_ways_profile(spec.profile):
-        default_way_textures = {
-            "paved": r"data\silnice.pac",
-            "dirt": r"data\cesta.pac",
-            "gravel": r"data\asfaltka.pac",
-        }
+        # A texture-only way uses that texture for BOTH appearance and
+        # wheel contacts. Use the visual face rather than the Roadway LOD
+        # texture, which can be untextured or have different artwork.
         way_textures = {
-            surface: (
-                road_surface_style_report.get(surface, {}).get("roadway_texture")
+            surface: str(
+                road_surface_style_report.get(surface, {}).get("visual_texture")
                 or fallback
             )
-            for surface, fallback in default_way_textures.items()
+            for surface, fallback in STOCK_WAY_TEXTURES.items()
         }
         ways_report = {
             "enabled": True,
@@ -4881,8 +4884,10 @@ def build_milestone4(
                 ways_path, dataset, projection,
                 include_minor_roads=spec.include_minor_roads,
                 surface_textures=way_textures,
+                surface_donors=native_way_donors,
             ),
             "surface_textures": way_textures,
+            "surface_donors": native_way_donors,
             "omitted_legacy_road_objects": len(road_fit.objects),
         }
     else:
