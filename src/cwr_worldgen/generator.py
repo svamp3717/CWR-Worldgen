@@ -4963,6 +4963,10 @@ def build_milestone4(
         pruned_road_assets = _prune_unused_native_way_road_assets(
             source_dir, spec.name, tuple(combined_model_usage),
         )
+        if infrastructure_generation is None:
+            # A previous keep-output run may have written a catalogue of
+            # obsolete road-only variants. Never embed a dangling catalogue.
+            (source_dir / "i" / "infrastructure.json").unlink(missing_ok=True)
         # A texture-only way uses that texture for BOTH appearance and
         # wheel contacts. Use the visual face rather than the Roadway LOD
         # texture, which can be untextured or have different artwork.
