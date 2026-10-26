@@ -1304,6 +1304,13 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
     for path, material in zip(material_texture_paths, OSM_MATERIALS):
         write_solid_dxt1_paa(path, colour=material.colour)
     write_solid_dxt1_paa(dummy_texture_path, colour=(255, 0, 255))
+    milestone3_bridge_covers: tuple[WorldObject, ...] = ()
+    if is_osm_ways_profile(spec.profile):
+        from .bridge_way_surface import bridge_road_surface_covers
+        milestone3_bridge_covers = bridge_road_surface_covers(
+            generated.objects[generated.road_objects:],
+            elevations, spec, starting_id=len(generated.objects) + 1,
+        )
     write_rvw4(
         wrp_path,
         spec.cells,
@@ -1311,7 +1318,7 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
         elevations,
         wrp_texture_indices,
         texture_table_paths,
-        generated.objects[generated.road_objects:]
+        (*generated.objects[generated.road_objects:], *milestone3_bridge_covers)
         if is_osm_ways_profile(spec.profile) else generated.objects,
         height_scale=spec.height_scale,
         renumber_object_ids=is_osm_ways_profile(spec.profile),
@@ -1332,6 +1339,7 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
                     == r"o\hous\most_stred30.p3d"
                 ),
             ),
+            "buried_bridge_road_covers": len(milestone3_bridge_covers),
             "omitted_legacy_road_objects": generated.road_objects,
         }
     else:
