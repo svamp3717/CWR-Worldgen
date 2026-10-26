@@ -19,12 +19,14 @@ TEXTURES = {
 }
 
 
-def _export(tmp_path, roads, *, include_minor=True, world_size=100.0, **features):
+def _export(tmp_path, roads, *, include_minor=True, world_size=100.0,
+            surface_donors=None, **features):
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), world_size)
     path = tmp_path / "test_world.ways"
     info = write_osm_road_ways(
         path, SimpleNamespace(roads=tuple(roads), **features), projection,
         include_minor_roads=include_minor, surface_textures=TEXTURES,
+        surface_donors=surface_donors,
     )
     lines = path.read_text(encoding="utf-8").splitlines()
     nodes = {
@@ -271,3 +273,139 @@ def test_watercourse_near_corner_blocks_rural_smoothing(tmp_path):
     )
     assert info["smoothed_rural_bends"] == 0
     assert _way_points(nodes, ways[0]) == [(200, 200), (400, 200), (400, 400)]
+
+
+
+def test_compatible_end_to_end_ways_merge_and_round_joint_as_one_road(tmp_path):
+    first = OsmLineFeature(
+        "way/001", {"highway": "tertiary"},
+        (_ll(200, 200), _ll(400, 200)),
+    )
+    second = OsmLineFeature(
+        "way/002", {"highway": "tertiary"},
+        (_ll(400, 200), _ll(400, 400)),
+    )
+    info, nodes, ways, content = _export(
+        tmp_path, [first, second], world_size=1000,
+    )
+    pts = _way_points(nodes, ways[0])
+    assert info["merged_source_runs"] == 1
+    assert info["merged_road_chains"] == 1
+    assert info["ways"] == 1
+    assert info["smoothed_rural_bends"] == 1
+    assert (400, 200) not in pts
+    assert {pts[0], pts[-1]} == {(200, 200), (400, 400)}
+    assert _export(tmp_path, [second, first], world_size=1000)[3] == content
+    # Heading changes gradually, not as a right angle between adjacent
+    # segments. At the endpoints the cubic is tangent to the source road.
+    directions = []
+    for a, b in zip(pts, pts[1:]):
+        length = __import__("math").dist(a, b)
+        directions.append(((b[0]-a[0])/length, (b[1]-a[1])/length))
+    assert min(a[0]*b[0] + a[1]*b[1] for a, b in zip(
+        directions, directions[1:])) > 0.94
+
+
+def test_reversed_ways_can_merge_without_an_unintentional_spur(tmp_path):
+    west = OsmLineFeature(
+        "way/west", {"highway": "residential"},
+        (_ll(400, 200), _ll(200, 200)),
+    )
+    east = OsmLineFeature(
+        "way/east", {"highway": "residential"},
+        (_ll(600, 200), _ll(400, 200)),
+    )
+    info, nodes, ways, _ = _export(tmp_path, [west, east], world_size=1000)
+    assert info["ways"] == 1
+    assert info["merged_source_runs"] == 1
+    assert len(_way_points(nodes, ways[0])) == 3
+
+
+def test_t_junction_remains_three_ways_with_a_shared_node(tmp_path):
+    roads = [
+        OsmLineFeature("way/a", {"highway": "residential"}, (
+            _ll(200, 200), _ll(400, 200),
+        )),
+        OsmLineFeature("way/b", {"highway": "residential"}, (
+            _ll(400, 200), _ll(600, 200),
+        )),
+        OsmLineFeature("way/c", {"highway": "residential"}, (
+            _ll(400, 200), _ll(400, 400),
+        )),
+    ]
+    info, nodes, ways, _ = _export(tmp_path, roads, world_size=1000)
+    assert info["ways"] == 3
+    assert info["merged_source_runs"] == 0
+    shared = {nid for nid, xz in nodes.items() if xz == (400, 200)}
+    assert len(shared) == 1
+    assert all(shared.issubset(set(w[3])) for w in ways)
+
+
+def test_width_and_surface_changes_prevent_merging(tmp_path):
+    primary = OsmLineFeature(
+        "way/1", {"highway": "residential", "width": "6.0"},
+        (_ll(200, 200), _ll(400, 200)),
+    )
+    different_width = OsmLineFeature(
+        "way/2", {"highway": "residential", "width": "8.0"},
+        (_ll(400, 200), _ll(600, 200)),
+    )
+    info, _, _, _ = _export(
+        tmp_path, [primary, different_width], world_size=1000,
+    )
+    assert info["ways"] == 2
+    dirt = OsmLineFeature(
+        "way/3", {"highway": "residential", "width": "6.0",
+                 "surface": "dirt"},
+        (_ll(400, 200), _ll(600, 200)),
+    )
+    info, _, _, _ = _export(tmp_path, [primary, dirt], world_size=1000)
+    assert info["ways"] == 2
+
+
+def test_near_coincident_endpoints_remain_separate(tmp_path):
+    roads = [
+        OsmLineFeature("way/1", {"highway": "residential"}, (
+            _ll(200, 200), _ll(400, 200),
+        )),
+        OsmLineFeature("way/2", {"highway": "residential"}, (
+            _ll(400.02, 200), _ll(600, 200),
+        )),
+    ]
+    info, nodes, ways, _ = _export(tmp_path, roads, world_size=1000)
+    assert info["ways"] == 2
+    assert not set(ways[0][3]).intersection(ways[1][3])
+
+
+def test_ring_ways_preserve_edges_without_self_joining(tmp_path):
+    vertices = [(200, 200), (400, 200), (400, 400), (200, 400)]
+    roads = [
+        OsmLineFeature(f"way/{i}", {"highway": "residential"}, (
+            _ll(*vertices[i]), _ll(*vertices[(i+1)%4]),
+        ))
+        for i in range(4)
+    ]
+    info, nodes, ways, _ = _export(tmp_path, roads, world_size=1000)
+    assert info["ways"] >= 2
+    assert info["merged_source_runs"] >= 1
+    endpoints = [set((way[3][0], way[3][-1])) for way in ways]
+    assert len(endpoints) == len(ways)
+
+
+def test_isolated_engine_donor_model_sources_preserve_texture_fallback(tmp_path):
+    road = _open_country_road()
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000,
+        surface_donors={"paved": r"o\road\sil25.p3d"},
+    )
+    assert info["surface_sources"]["paved"] == r"donor=o\road\sil25.p3d"
+    assert ways[0][2] == r"donor=o\road\sil25.p3d"
+    assert info["surface_sources"]["gravel"] == TEXTURES["gravel"]
+
+
+def test_invalid_donor_is_rejected_without_writing_file(tmp_path):
+    with pytest.raises(ValueError, match="Invalid CWR-CE road donor"):
+        _export(
+            tmp_path, [_open_country_road()], world_size=1000,
+            surface_donors={"paved": r"outside map.p3d"},
+        )
