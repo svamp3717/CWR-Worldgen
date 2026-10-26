@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+import hashlib
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -140,6 +141,22 @@ _MAX_BEND_DEGREES = 135.0
 _MAX_TANGENT_METRES = 38.0
 _MIN_CURVE_RADIUS_METRES = 12.0
 _MAX_CORRIDOR_DEVIATION_METRES = 14.0
+# A gently wandering centerline on long *already straight* rural stretches.
+# Maximum displacements are small because the terrain grader follows OSM.
+_MIN_FLOW_LENGTH_METRES = 140.0
+_FLOW_AFTER_CURVE_LENGTH_METRES = 250.0
+_FLOW_SAMPLE_METRES = 12.0
+_MAX_FLOW_OFFSET_METRES = 4.0
+_FLOW_AMPLITUDES_METRES = {
+    "secondary": 1.4,
+    "tertiary": 2.4,
+    "unclassified": 3.1,
+    "residential": 2.0,
+    "living_street": 1.2,
+    "service": 2.2,
+    "road": 2.6,
+    "track": 3.8,
+}
 _JUNCTION_CLEARANCE_METRES = 24.0
 _ROAD_SHOULDER_CLEARANCE_METRES = 3.0
 _BUILDING_CLEARANCE_METRES = 4.0
@@ -332,6 +349,68 @@ class _BendClearance:
             shapes[int(index)].intersects(query) for index in tree.query(query)
         )
 
+    def allows_flow(
+        self,
+        owner: int,
+        original: Sequence[tuple[float, float]],
+        candidate: Sequence[tuple[float, float]],
+        width: float,
+        before: Sequence[tuple[float, float]],
+        after: Sequence[tuple[float, float]],
+    ) -> bool:
+        """Check a long rural S-curve, excluding only its fixed end approaches."""
+        path = LineString(candidate)
+        old_path = LineString(original)
+        if (
+            not path.is_simple
+            or path.hausdorff_distance(old_path) > _MAX_FLOW_OFFSET_METRES + 0.25
+        ):
+            return False
+        footprint = path.buffer(width * 0.5 + _ROAD_SHOULDER_CLEARANCE_METRES)
+        minx, minz, maxx, maxz = footprint.bounds
+        if minx < 0 or minz < 0 or maxx >= self.limit or maxz >= self.limit:
+            return False
+        if self._intersects(self.settlements, self.settlement_shapes, footprint):
+            return False
+        if self._intersects(self.obstacles, self.obstacle_shapes, footprint):
+            return False
+
+        # At shared junctions, the curve meets the source geometry exactly.
+        # Trim the first/last 24 m only for network-proximity checks, so a
+        # connected side road at an endpoint doesn't reject the whole run.
+        from shapely.ops import substring
+        trimmed = substring(
+            path, _JUNCTION_CLEARANCE_METRES,
+            max(_JUNCTION_CLEARANCE_METRES + 1.0,
+                path.length - _JUNCTION_CLEARANCE_METRES),
+        )
+        if self._intersects(
+            self.junctions, self.junction_points,
+            trimmed.buffer(_JUNCTION_CLEARANCE_METRES * 0.75),
+        ):
+            return False
+        if self.roads is not None:
+            search = trimmed.buffer(width * 0.5 + 28.0)
+            for found in self.roads.query(search):
+                index = int(found)
+                if self.road_owners[index] == owner:
+                    continue
+                clearance = (
+                    width * 0.5 + self.road_half_widths[index]
+                    + _ROAD_SHOULDER_CLEARANCE_METRES
+                )
+                if trimmed.distance(self.road_shapes[index]) <= clearance:
+                    return False
+        # A distant section of the *same* road can also pass beside the
+        # candidate on hairpins. These are not separate owners in the index.
+        for remainder in (before, after):
+            if len(remainder) >= 2 and trimmed.distance(
+                LineString(remainder)
+            ) <= width + _ROAD_SHOULDER_CLEARANCE_METRES:
+                return False
+        return True
+
+
     def allows(
         self,
         owner: int,
@@ -467,6 +546,102 @@ def _round_rural_bends(
     return result, len(rounded)
 
 
+def _flow_rural_straights(
+    run: Sequence[tuple[float, float]],
+    *,
+    owner: int,
+    tags: Mapping[str, str],
+    width: float,
+    clearance: _BendClearance,
+) -> tuple[list[tuple[float, float]], int]:
+    """Introduce gentle deterministic S-curves on long, open straight spans.
+
+    Consecutive almost-collinear source edges are considered together.
+    Endpoints and road junction vertices remain in place. A fade envelope
+    gives the synthetic curve a zero offset and zero offset derivative at
+    both ends, avoiding visible kinks when it rejoins the original road.
+    """
+    amplitude = _FLOW_AMPLITUDES_METRES.get(tags.get("highway", "").casefold(), 0.0)
+    if amplitude <= 0 or len(run) < 2:
+        return list(run), 0
+    result = [run[0]]
+    softened = 0
+    i = 0
+    while i + 1 < len(run):
+        j = i + 1
+        start = run[i]
+        # Group short straight OSM edges, but never smooth a bend or consume
+        # an interior vertex used by a different road.
+        while j + 1 < len(run):
+            a, b, c = run[j - 1], run[j], run[j + 1]
+            if _point_key(b) in clearance.shared:
+                break
+            previous = math.dist(a, b)
+            following = math.dist(b, c)
+            if min(previous, following) < 0.001:
+                break
+            incoming = ((b[0] - a[0]) / previous, (b[1] - a[1]) / previous)
+            outgoing = ((c[0] - b[0]) / following, (c[1] - b[1]) / following)
+            if incoming[0] * outgoing[0] + incoming[1] * outgoing[1] < math.cos(
+                math.radians(6.0)
+            ):
+                break
+            chord = LineString((start, c))
+            if chord.distance(Point(*b)) > 1.5:
+                break
+            j += 1
+
+        original = list(run[i:j + 1])
+        span = math.dist(start, original[-1])
+        near_rounded_curve = (
+            (i > 0 and math.dist(run[i - 1], start) < 10.0)
+            or (j + 1 < len(run) and math.dist(run[j], run[j + 1]) < 10.0)
+        )
+        min_length = (
+            _FLOW_AFTER_CURVE_LENGTH_METRES if near_rounded_curve
+            else _MIN_FLOW_LENGTH_METRES
+        )
+        accepted = False
+        if span >= min_length:
+            end = original[-1]
+            direction = ((end[0] - start[0]) / span,
+                         (end[1] - start[1]) / span)
+            normal = (-direction[1], direction[0])
+            # Reverse-safe sign: reversing the segment also reverses its
+            # normal and sin(2*pi*t), producing exactly the same curve.
+            endpoints = sorted((_point_key(start), _point_key(end)))
+            signature = repr((endpoints, round(span), _surface(tags))).encode()
+            sign = 1.0 if hashlib.sha256(signature).digest()[0] & 1 else -1.0
+            waves = min(3, max(1, round(span / 260.0)))
+            count = max(12, math.ceil(span / _FLOW_SAMPLE_METRES))
+            candidate = []
+            for k in range(count + 1):
+                t = k / count
+                # sin(pi*t)^2 smoothly eases offsets and heading into the
+                # original road at both ends. No random vertex jitter.
+                offset = (
+                    sign * amplitude
+                    * math.sin(math.pi * t) ** 2
+                    * math.sin(2.0 * math.pi * waves * t)
+                )
+                x = start[0] + (end[0] - start[0]) * t + normal[0] * offset
+                z = start[1] + (end[1] - start[1]) * t + normal[1] * offset
+                point = (round(x, _COORD_DECIMALS), round(z, _COORD_DECIMALS))
+                if not candidate or point != candidate[-1]:
+                    candidate.append(point)
+            accepted = len(candidate) > 2 and clearance.allows_flow(
+                owner, original, candidate, width,
+                run[:i+1], run[j:],
+            )
+            if accepted:
+                result.extend(candidate[1:])
+                softened += 1
+        if not accepted:
+            result.extend(original[1:])
+        i = j
+    return result, softened
+
+
 def write_osm_road_ways(
     path: Path,
     dataset: OsmDataset,
@@ -540,11 +715,16 @@ def write_osm_road_ways(
     source_runs = _merge_compatible_runs(source_runs, non_ground_points)
     clearance = _BendClearance(dataset, projection, source_runs)
     smoothed_bends = 0
+    softened_rural_straights = 0
     for owner, tags, width, original in source_runs:
         run, rounded = _round_rural_bends(
             original, owner=owner, width=width, clearance=clearance,
         )
+        run, softened = _flow_rural_straights(
+            run, owner=owner, tags=tags, width=width, clearance=clearance,
+        )
         smoothed_bends += rounded
+        softened_rural_straights += softened
         for index in range(0, len(run) - 1, _MAX_NODES_PER_WAY - 1):
             chunk = run[index:index + _MAX_NODES_PER_WAY]
             if len(chunk) < 2:
@@ -591,6 +771,7 @@ def write_osm_road_ways(
         "ways": len(lines),
         "excluded_bridge_features": skipped_elevated,
         "smoothed_rural_bends": smoothed_bends,
+        "softened_rural_straights": softened_rural_straights,
         "merged_source_runs": original_run_count - len(source_runs),
         "merged_road_chains": len(source_runs),
         "surface_sources": sources,
