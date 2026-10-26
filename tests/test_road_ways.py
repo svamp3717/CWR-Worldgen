@@ -438,3 +438,17 @@ def test_long_open_approaches_get_a_larger_curve_radius(tmp_path):
     assert short_pts[0] == long_pts[0] == (200, 200)
     assert short_pts[-1] == (280, 280)
     assert long_pts[-1] == (400, 400)
+
+
+
+def test_tunnel_approach_is_not_rounded_or_merged_across(tmp_path):
+    tunnel = OsmLineFeature(
+        "way/tunnel", {"highway": "tertiary", "tunnel": "yes"},
+        (_ll(400, 200), _ll(530, 200)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [_open_country_road(), tunnel], world_size=1000,
+    )
+    assert info["ways"] == 1
+    assert info["smoothed_rural_bends"] == 0
+    assert (400, 200) in _way_points(nodes, ways[0])
