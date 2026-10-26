@@ -35,6 +35,16 @@ appear twice. Worldgen still computes its original road fit as input for terrain
 grading and building/vegetation clearance. Non-road P3Ds and separately
 modelled bridge/other infrastructure are retained.
 
+It also excludes those omitted road objects from **generated model usage**;
+previously, they were removed from the WRP but still caused generated road
+P3Ds to be packed unnecessarily. Builds using an existing output directory
+now prune stale unused generated road P3Ds and road-only textures from
+`source/<world>/i/` before PBO packing. Generated bridges, rocks, fences
+and utilities are not deleted, nor are any generated road models actually
+referenced by retained WRP objects. PBO verification rejects unexpected
+unused generated road P3Ds in native-ways builds. A donor P3D referenced by
+`donor=...p3d` is an external mounted asset, not a generated road object.
+
 ## Natural bends across rural roads
 
 The exporter first **merges compatible end-to-end OSM ways** into continuous
