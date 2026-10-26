@@ -46,6 +46,13 @@ def is_osm_ways_profile(profile: str) -> bool:
     return profile == "cwr-ce-ways"
 
 
+def _non_ground(tags: Mapping[str, str]) -> bool:
+    return any(
+        str(tags.get(key, "")).strip().casefold() not in {"", "no", "false", "0"}
+        for key in ("bridge", "tunnel")
+    )
+
+
 def _surface(tags: Mapping[str, str]) -> str:
     if tags.get("highway", "").casefold() in PEDESTRIAN_ONLY_HIGHWAYS:
         return "dirt"
@@ -253,16 +260,16 @@ class _BendClearance:
         source_runs: Sequence[tuple[int, Mapping[str, str], float, list[tuple[float, float]]]],
     ) -> None:
         self.limit = projection.world_size - 0.01
-        # Bridge geometry is omitted from the native export, but its original
-        # approaches and connections still need protection from rounding.
-        bridge_runs = []
+        # Omitted bridge and tunnel geometry still defines approaches that
+        # must not be moved by native-road curve rounding.
+        non_ground_runs = []
         for index, road in enumerate(getattr(dataset, "roads", ())):
-            if road.tags.get("bridge", "").strip().casefold() in {"", "no", "false", "0"}:
+            if not _non_ground(road.tags):
                 continue
             points = tuple(projection.to_world(point) for point in road.points)
             for run in _runs(points, self.limit):
-                bridge_runs.append((-(index + 1), road.tags, _width(road.tags), run))
-        clearance_runs = (*source_runs, *bridge_runs)
+                non_ground_runs.append((-(index + 1), road.tags, _width(road.tags), run))
+        clearance_runs = (*source_runs, *non_ground_runs)
         self.road_shapes = [LineString(run) for _, _, _, run in clearance_runs]
         self.road_owners = [owner for owner, _, _, _ in clearance_runs]
         self.road_half_widths = [width * 0.5 for _, _, width, _ in clearance_runs]
@@ -523,15 +530,14 @@ def write_osm_road_ways(
             source_runs.append((owner, tags, _width(tags), run))
 
     original_run_count = len(source_runs)
-    # Bridges are omitted from native geometry, but their junctions must
-    # remain untouched by chain joining and bend rounding.
-    bridge_points = {
+    # Bridge/tunnel models are not native ribbons; preserve their approaches.
+    non_ground_points = {
         _point_key(projection.to_world(p))
         for road in dataset.roads
-        if road.tags.get("bridge", "").strip().casefold() not in {"", "no", "false", "0"}
+        if _non_ground(road.tags)
         for p in road.points
     }
-    source_runs = _merge_compatible_runs(source_runs, bridge_points)
+    source_runs = _merge_compatible_runs(source_runs, non_ground_points)
     clearance = _BendClearance(dataset, projection, source_runs)
     smoothed_bends = 0
     for owner, tags, width, original in source_runs:
