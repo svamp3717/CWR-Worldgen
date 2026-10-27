@@ -1582,6 +1582,7 @@ def build_milestone9(output_dir: Path, spec: Milestone9Spec, *, clean: bool = Tr
         pbo_backend=spec.pbo_backend,
         poseidon_tools_path=spec.poseidon_tools_path,
         include_minor_roads=spec.include_minor_roads,
+        native_way_donor_width=spec.native_way_donor_width,
         procedural_gravel_roads=spec.procedural_gravel_roads,
         procedural_paved_road_fallback=spec.procedural_paved_road_fallback,
         custom_road_shapes=spec.custom_road_shapes,
