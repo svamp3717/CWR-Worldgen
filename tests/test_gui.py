@@ -678,6 +678,17 @@ class GuiCommandTests(unittest.TestCase):
             self.assertEqual(restored["profile"], "cwa")
 
 
+    def test_native_way_width_flag_parses_for_frozen_source_builds(self) -> None:
+        from cwr_worldgen.cli import _parser
+
+        for name in ("milestone5", "milestone6", "milestone7", "milestone8", "milestone9"):
+            args = _parser().parse_args([
+                name, "--output", "out", "--source-dir", "source",
+                "--profile", "cwr-ce-ways", "--native-way-donor-width",
+            ])
+            self.assertTrue(args.native_way_donor_width)
+            self.assertEqual(args.profile, "cwr-ce-ways")
+
     def test_native_way_donor_width_is_optional_and_saved_in_gui_commands(self) -> None:
         defaults = default_gui_values()
         defaults["profile"] = "cwr-ce-ways"
