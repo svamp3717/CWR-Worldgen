@@ -122,8 +122,9 @@ and the ribbon clearance checks. Widths and the active setting are
 reported as `road_ways.surface_widths` and
 `road_ways.keep_donor_road_width`.
 
-To use this setting, add the PBO(s) containing the configured straight
-road donors to **Asset roots**. If a used road surface has no readable
+To use this setting, build with **milestone4 or later** and add the PBO(s)
+containing the configured straight road donors to **Asset roots**.
+Milestone3 cannot inspect donor P3Ds and rejects the option explicitly. If a used road surface has no readable
 donor or an invalid physical width, the build gives an explicit error
 rather than silently keeping the OSM value. Unused surface families
 don't require donor assets. With the checkbox **unchecked**, road width
