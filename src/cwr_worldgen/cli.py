@@ -164,6 +164,7 @@ def _add_osm_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--point-building-footprint", type=float, default=12.0, help="assumed square footprint for OSM building nodes in metres")
     parser.add_argument("--max-forest-objects", type=int, default=DEFAULT_MAX_FOREST_OBJECTS, help=f"primary-forest object warning threshold; exceeded values are logged and generation continues; 0 disables primary forest objects (default: {DEFAULT_MAX_FOREST_OBJECTS:,})")
     parser.add_argument("--include-minor-roads", action="store_true", help="also import paths, footways, cycleways, bridleways, and pedestrian ways")
+    parser.add_argument("--native-way-donor-width", action="store_true", help="cwr-ce-ways only: keep measured P3D donor width instead of OSM road width; donor must be in Asset roots")
 
 
 def _osm_kwargs(args: argparse.Namespace) -> dict[str, object]:
@@ -193,6 +194,7 @@ def _osm_kwargs(args: argparse.Namespace) -> dict[str, object]:
         "max_forest_objects": args.max_forest_objects,
         "advisory_object_limits": True,
         "include_minor_roads": args.include_minor_roads,
+        "native_way_donor_width": args.native_way_donor_width,
     }
 
 
@@ -943,6 +945,7 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                native_way_donor_width=args.native_way_donor_width,
                 paved_road_model=args.paved_road_model,
                 paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
@@ -996,6 +999,7 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                native_way_donor_width=args.native_way_donor_width,
                 paved_road_model=args.paved_road_model,
                 paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
@@ -1049,6 +1053,7 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                native_way_donor_width=args.native_way_donor_width,
                 paved_road_model=args.paved_road_model,
                 paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
@@ -1112,6 +1117,7 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                native_way_donor_width=args.native_way_donor_width,
                 paved_road_model=args.paved_road_model,
                 paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
@@ -1198,6 +1204,7 @@ def main(argv: list[str] | None = None) -> int:
                 water_depth=args.water_depth,
                 coastline_blend_cells=args.coast_blend_cells,
                 road_segment_length=args.road_segment_length,
+                native_way_donor_width=args.native_way_donor_width,
                 paved_road_model=args.paved_road_model,
                 paved_road_curve_model=args.paved_road_curve_model,
                 gravel_road_model=args.gravel_road_model,
