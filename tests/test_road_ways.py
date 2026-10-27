@@ -870,3 +870,31 @@ def test_native_ways_reject_invalid_donor_width(tmp_path, value):
             surface_widths={"paved": value},
             require_donor_widths=True,
         )
+
+
+
+def test_donor_width_measurement_prefers_actual_p3d_connector_span(monkeypatch):
+    from cwr_worldgen import generator
+    monkeypatch.setattr(generator, "read_asset_record_bytes", lambda record: b"P3D")
+    monkeypatch.setattr(generator, "inspect_visual_model_dimensions", lambda data:
+        SimpleNamespace(connector_width_metres=7.375, width_metres=9.8))
+    assert generator._native_way_donor_width(object(), "paved") == 7.375
+
+    monkeypatch.setattr(generator, "inspect_visual_model_dimensions", lambda data:
+        SimpleNamespace(connector_width_metres=None, width_metres=4.125))
+    assert generator._native_way_donor_width(object(), "gravel") == 4.125
+
+
+def test_donor_width_measurement_rejects_unreadable_or_invalid_p3ds(monkeypatch):
+    from cwr_worldgen import generator
+    monkeypatch.setattr(generator, "read_asset_record_bytes", lambda record: b"P3D")
+    monkeypatch.setattr(generator, "inspect_visual_model_dimensions", lambda data:
+        SimpleNamespace(connector_width_metres=90.0, width_metres=9.0))
+    with pytest.raises(ValueError, match="Invalid paved native-way P3D donor width"):
+        generator._native_way_donor_width(object(), "paved")
+
+    def missing(record):
+        raise OSError("corrupt PBO")
+    monkeypatch.setattr(generator, "read_asset_record_bytes", missing)
+    with pytest.raises(ValueError, match="Could not measure dirt"):
+        generator._native_way_donor_width(object(), "dirt")
