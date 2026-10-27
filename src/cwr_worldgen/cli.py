@@ -235,6 +235,7 @@ def _add_source_feature_arguments(
     parser.add_argument("--max-forest-objects", type=int, default=DEFAULT_MAX_FOREST_OBJECTS, help=f"primary-forest object warning threshold; exceeded values are logged and generation continues; 0 disables primary forest objects (default: {DEFAULT_MAX_FOREST_OBJECTS:,})")
     parser.add_argument("--include-minor-roads", action="store_true", dest="include_minor_roads", help="include service, track and other minor OSM roads")
     parser.add_argument("--no-minor-roads", action="store_false", dest="include_minor_roads", help="exclude service, track and other minor OSM roads")
+    parser.add_argument("--native-way-donor-width", action="store_true", help="cwr-ce-ways only: keep measured P3D donor width rather than OSM width; donor must be in Asset roots")
     parser.set_defaults(include_minor_roads=include_minor_roads_default)
 
 
