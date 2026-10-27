@@ -104,6 +104,36 @@ The build manifest now includes **road_ways.smoothed_rural_bends**,
 **road_ways.softened_rural_straights**, **road_ways.merged_source_runs**,
 and **road_ways.merged_road_chains**.
 
+## Optional donor road widths
+
+In the GUI's **Advanced generation → Road model donors**, enable
+**Keep donor road width (CWR-CE native .ways only)** to use the measured
+straight donor P3D width instead of OSM's highway/width-derived values.
+The option is **off by default**, is saved between GUI launches and in
+saved GUI profiles, and can also be enabled from the CLI with
+`--native-way-donor-width`.
+
+When checked, the writer reads the **connector span** from each mounted
+P3D donor's inspected geometry, falling back to its visual mesh width
+only when connectors are absent. The result is emitted directly as the
+width in each `way` record for its paved/dirt/gravel surface family.
+This also affects which ways can merge (same surface and final width)
+and the ribbon clearance checks. Widths and the active setting are
+reported as `road_ways.surface_widths` and
+`road_ways.keep_donor_road_width`.
+
+To use this setting, add the PBO(s) containing the configured straight
+road donors to **Asset roots**. If a used road surface has no readable
+donor or an invalid physical width, the build gives an explicit error
+rather than silently keeping the OSM value. Unused surface families
+don't require donor assets. With the checkbox **unchecked**, road width
+calculation remains unchanged.
+
+This only changes native CWR-CE `.ways` widths, **not** the actual P3D
+mesh dimensions or the earlier OSM-based terrain grader. For very wide
+custom donors, inspect roadside buildings, curves, and bridge approaches
+in game, since the original graded corridor may be narrower.
+
 ## Road surface materials and isolated CWR-CE
 
 The isolated branch extends the existing format to accept a **road P3D
