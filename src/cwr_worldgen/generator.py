@@ -4695,6 +4695,7 @@ def build_milestone4(
     road_surface_styles: dict[str, RoadSurfaceStyle] = {}
     road_surface_style_report: dict[str, dict[str, object]] = {}
     native_way_donors: dict[str, str] = {}
+    native_way_donor_records: dict[str, object] = {}
 
     road_texture_donors: dict[str, str] = {}
 
@@ -4815,10 +4816,42 @@ def build_milestone4(
                 use_cache=bool(getattr(spec, "cache_enabled", True)),
                 refresh=bool(getattr(spec, "cache_refresh", False)),
             )
-            available = {record.path for record in native_scan.records}
+            available = {record.path: record for record in native_scan.records}
             for surface, model in native_candidates.items():
-                if canonical_asset_path(model) in available:
+                record = available.get(canonical_asset_path(model))
+                if record is not None:
                     native_way_donors[surface] = model
+                    native_way_donor_records[surface] = record
+
+    native_way_widths: dict[str, float] = {}
+    if is_osm_ways_profile(spec.profile) and spec.native_way_donor_width:
+        # Never substitute an OSM width silently when the opt-in promises
+        # exact connector widths from the game's P3D donor meshes.
+        missing = set(("paved", "dirt", "gravel")) - set(native_way_donor_records)
+        if missing:
+            raise ValueError(
+                "Keep donor road width requires measurable mounted P3D models "
+                "for paved, dirt and gravel. Add their PBOs under Asset roots; "
+                "missing: " + ", ".join(sorted(missing))
+            )
+        for surface, record in native_way_donor_records.items():
+            try:
+                donor_bytes = read_asset_record_bytes(record)
+                geometry = inspect_visual_model_dimensions(donor_bytes)
+                measured_width = float(
+                    geometry.connector_width_metres
+                    if geometry.connector_width_metres is not None
+                    else geometry.width_metres
+                )
+            except (OSError, ValueError, ProxyCloneError, FileNotFoundError) as exc:
+                raise ValueError(
+                    f"Could not measure {surface} native-way P3D donor width: {exc}"
+                ) from exc
+            if not math.isfinite(measured_width) or not 0.5 <= measured_width <= 50.0:
+                raise ValueError(
+                    f"Invalid {surface} native-way P3D donor width: {measured_width!r}"
+                )
+            native_way_widths[surface] = measured_width
 
     if generated_infrastructure_usage:
         infrastructure_library = ProceduralInfrastructureLibrary(
@@ -5014,6 +5047,7 @@ def build_milestone4(
                 include_minor_roads=spec.include_minor_roads,
                 surface_textures=way_textures,
                 surface_donors=native_way_donors,
+                surface_widths=native_way_widths,
                 bridge_objects=tuple(
                     obj for obj in nonroads.objects
                     if obj.model_path.replace("/", chr(92)).casefold()
@@ -5022,6 +5056,7 @@ def build_milestone4(
             ),
             "surface_textures": way_textures,
             "surface_donors": native_way_donors,
+            "keep_donor_road_width": bool(spec.native_way_donor_width),
             "pruned_unused_road_assets": list(pruned_road_assets),
             "buried_bridge_road_covers": len(bridge_surface_covers),
             "omitted_legacy_road_objects": len(road_fit.objects),
