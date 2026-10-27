@@ -677,6 +677,30 @@ class GuiCommandTests(unittest.TestCase):
             restored = defaults_with_recent_source(default_gui_values(), state)
             self.assertEqual(restored["profile"], "cwa")
 
+
+    def test_native_way_donor_width_is_optional_and_saved_in_gui_commands(self) -> None:
+        defaults = default_gui_values()
+        defaults["profile"] = "cwr-ce-ways"
+        self.assertFalse(defaults["native_way_donor_width"])
+        command = build_milestone9_command(defaults, python="python")
+        self.assertNotIn("--native-way-donor-width", command)
+
+        defaults["native_way_donor_width"] = True
+        command = build_milestone9_command(defaults, python="python")
+        self.assertEqual(command.count("--native-way-donor-width"), 1)
+        restored = defaults_with_recent_source(
+            default_gui_values(), {"native_way_donor_width": True},
+        )
+        self.assertTrue(restored["native_way_donor_width"])
+        restored_off = defaults_with_recent_source(
+            default_gui_values(), {"native_way_donor_width": False},
+        )
+        self.assertFalse(restored_off["native_way_donor_width"])
+        invalid = defaults_with_recent_source(
+            default_gui_values(), {"native_way_donor_width": "false"},
+        )
+        self.assertFalse(invalid["native_way_donor_width"])
+
     def test_gui_state_restores_road_donors_between_restarts(self) -> None:
         defaults = defaults_with_recent_source(
             default_gui_values(),
@@ -725,11 +749,16 @@ class GuiCommandTests(unittest.TestCase):
                 ),
                 "dirt_road_model": _Value(r"o\\road\\ces25.p3d"),
                 "dirt_road_curve_model": _Value(""),
+                "native_way_donor_width": _Value(True),
             }
 
             WorldgenGui._persist_road_asset_state(gui)
 
             state = load_gui_state(state_path)
+            self.assertIs(state["native_way_donor_width"], True)
+            self.assertTrue(defaults_with_recent_source(
+                default_gui_values(), state,
+            )["native_way_donor_width"])
             self.assertEqual(
                 state["gravel_road_model"],
                 r"sebnam_obj\\sebtrailpath25.p3d",
