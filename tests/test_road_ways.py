@@ -20,13 +20,16 @@ TEXTURES = {
 
 
 def _export(tmp_path, roads, *, include_minor=True, world_size=100.0,
-            surface_donors=None, bridge_objects=(), **features):
+            surface_donors=None, surface_widths=None, require_donor_widths=False,
+            bridge_objects=(), **features):
     projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), world_size)
     path = tmp_path / "test_world.ways"
     info = write_osm_road_ways(
         path, SimpleNamespace(roads=tuple(roads), **features), projection,
         include_minor_roads=include_minor, surface_textures=TEXTURES,
         surface_donors=surface_donors,
+        surface_widths=surface_widths,
+        require_donor_widths=require_donor_widths,
         bridge_objects=bridge_objects,
     )
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -797,3 +800,73 @@ def test_alternative_bridge_tags_receive_bank_connections(tmp_path):
         )
         assert info["restored_bridge_approach_ways"] == 2
         assert len(ways) == 2
+
+
+
+def test_opt_in_donor_width_overrides_osm_width_and_merges_compatible_runs(tmp_path):
+    a = OsmLineFeature(
+        "way/a", {"highway": "residential", "width": "6"},
+        (_ll(100, 300), _ll(200, 300)),
+    )
+    b = OsmLineFeature(
+        "way/b", {"highway": "residential", "width": "8"},
+        (_ll(200, 300), _ll(300, 300)),
+    )
+    ordinary, _, ordinary_ways, _ = _export(
+        tmp_path, [a, b], world_size=1000,
+    )
+    assert ordinary["ways"] == 2
+    assert {way[1] for way in ordinary_ways} == {6.0, 8.0}
+
+    donor, _, donor_ways, data = _export(
+        tmp_path, [a, b], world_size=1000,
+        surface_donors={"paved": r"mod\roads\wide25.p3d"},
+        surface_widths={"paved": 7.425},
+        require_donor_widths=True,
+    )
+    assert donor["keep_donor_road_width"] is True
+    assert donor["surface_widths"] == {"paved": 7.425}
+    assert donor["merged_source_runs"] == 1
+    assert donor["ways"] == 1
+    assert donor_ways[0][1] == 7.425
+    assert donor_ways[0][2] == r"donor=mod\roads\wide25.p3d"
+    assert _export(
+        tmp_path, [b, a], world_size=1000,
+        surface_donors={"paved": r"mod\roads\wide25.p3d"},
+        surface_widths={"paved": 7.425},
+        require_donor_widths=True,
+    )[3] == data
+
+
+def test_native_ways_require_measured_width_for_only_used_surfaces(tmp_path):
+    paved = OsmLineFeature(
+        "way/p", {"highway": "residential", "width": "11"},
+        (_ll(100, 250), _ll(230, 250)),
+    )
+    info, _, ways, _ = _export(
+        tmp_path, [paved], world_size=1000,
+        surface_widths={"paved": 5.375},
+        require_donor_widths=True,
+    )
+    assert info["ways"] == 1
+    assert ways[0][1] == 5.375
+    gravel = OsmLineFeature(
+        "way/g", {"highway": "track", "surface": "gravel"},
+        (_ll(300, 250), _ll(420, 250)),
+    )
+    with pytest.raises(ValueError, match="gravel"):
+        _export(
+            tmp_path, [paved, gravel], world_size=1000,
+            surface_widths={"paved": 5.375},
+            require_donor_widths=True,
+        )
+
+
+@pytest.mark.parametrize("value", [0.0, -3.0, 51.0, float("nan"), float("inf"), "n/a"])
+def test_native_ways_reject_invalid_donor_width(tmp_path, value):
+    with pytest.raises(ValueError, match="donor width"):
+        _export(
+            tmp_path, [_open_country_road()], world_size=1000,
+            surface_widths={"paved": value},
+            require_donor_widths=True,
+        )
