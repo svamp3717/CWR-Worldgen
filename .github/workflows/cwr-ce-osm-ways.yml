@@ -42,4 +42,7 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_gui.py::GuiCommandTests::test_game_profile_is_remembered_and_restored \
-            tests/test_gui.py::GuiCommandTests::test_game_profile_ignores_corrupt_or_obsolete_state
+            tests/test_gui.py::GuiCommandTests::test_game_profile_ignores_corrupt_or_obsolete_state \
+            tests/test_gui.py::GuiCommandTests::test_native_way_donor_width_is_optional_and_saved_in_gui_commands \
+            tests/test_gui.py::GuiCommandTests::test_native_way_width_flag_parses_for_frozen_source_builds \
+            tests/test_gui.py::GuiCommandTests::test_road_and_asset_persistence_writes_gui_state
