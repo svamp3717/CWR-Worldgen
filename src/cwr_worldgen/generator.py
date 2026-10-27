@@ -4827,13 +4827,8 @@ def build_milestone4(
     if is_osm_ways_profile(spec.profile) and spec.native_way_donor_width:
         # Never substitute an OSM width silently when the opt-in promises
         # exact connector widths from the game's P3D donor meshes.
-        missing = set(("paved", "dirt", "gravel")) - set(native_way_donor_records)
-        if missing:
-            raise ValueError(
-                "Keep donor road width requires measurable mounted P3D models "
-                "for paved, dirt and gravel. Add their PBOs under Asset roots; "
-                "missing: " + ", ".join(sorted(missing))
-            )
+        # Measure any installed donors. The native writer checks only the
+        # surfaces actually exported; unused surface families need no P3D.
         for surface, record in native_way_donor_records.items():
             try:
                 donor_bytes = read_asset_record_bytes(record)
@@ -5048,6 +5043,7 @@ def build_milestone4(
                 surface_textures=way_textures,
                 surface_donors=native_way_donors,
                 surface_widths=native_way_widths,
+                require_donor_widths=bool(spec.native_way_donor_width),
                 bridge_objects=tuple(
                     obj for obj in nonroads.objects
                     if obj.model_path.replace("/", chr(92)).casefold()
