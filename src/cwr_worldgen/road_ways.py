@@ -760,6 +760,7 @@ def write_osm_road_ways(
     include_minor_roads: bool,
     surface_textures: Mapping[str, str],
     surface_donors: Mapping[str, str] | None = None,
+    surface_widths: Mapping[str, float] | None = None,
     bridge_objects: Sequence[object] = (),
 ) -> dict[str, object]:
     """Export terrain-following non-bridge roads as a deterministic sidecar.
@@ -796,6 +797,21 @@ def write_osm_road_ways(
             raise ValueError(f"Invalid CWR-CE road donor for {surface}: {donor!r}")
         sources[surface] = "donor=" + name
 
+    resolved_widths: dict[str, float] = {}
+    for surface, measured in (surface_widths or {}).items():
+        if surface not in sources:
+            raise ValueError(f"Unknown native way surface width: {surface!r}")
+        try:
+            width = float(measured)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid donor width for {surface}: {measured!r}") from exc
+        if not math.isfinite(width) or not 0.5 <= width <= 50.0:
+            raise ValueError(f"Invalid donor width for {surface}: {measured!r}")
+        resolved_widths[surface] = width
+
+    def effective_width(tags: Mapping[str, str]) -> float:
+        return resolved_widths.get(_surface(tags), _width(tags))
+
     limit = projection.world_size - 0.01
     if limit <= 0:
         raise ValueError("OSM ways require positive terrain dimensions")
@@ -826,9 +842,9 @@ def write_osm_road_ways(
                     unmatched_bridge_features += 1
                 bridged_approaches += len(approaches)
                 for approach in approaches:
-                    source_runs.append((owner, tags, _width(tags), approach))
+                    source_runs.append((owner, tags, effective_width(tags), approach))
             else:
-                source_runs.append((owner, tags, _width(tags), run))
+                source_runs.append((owner, tags, effective_width(tags), run))
 
     original_run_count = len(source_runs)
     # Bridge/tunnel models are not native ribbons; preserve their approaches.
@@ -904,5 +920,6 @@ def write_osm_road_ways(
         "merged_source_runs": original_run_count - len(source_runs),
         "merged_road_chains": len(source_runs),
         "surface_sources": sources,
+        "surface_widths": resolved_widths,
         "format": "cwr-ce-osm-ways-v1",
     }
