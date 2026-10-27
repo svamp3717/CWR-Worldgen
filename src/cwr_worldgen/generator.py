@@ -1327,6 +1327,11 @@ def build_milestone3(output_dir: Path, spec: OsmSpec, *, clean: bool = True) -> 
     ways_path = source_dir / f"{spec.name}.ways"
     ways_report: dict[str, object] = {"enabled": False}
     if is_osm_ways_profile(spec.profile):
+        if spec.native_way_donor_width:
+            raise ValueError(
+                "Keep donor road width requires milestone4+ with P3D Asset roots; "
+                "milestone3 does not inspect road donor models"
+            )
         ways_report = {
             "enabled": True,
             **write_osm_road_ways(
