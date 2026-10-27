@@ -689,6 +689,55 @@ class GuiCommandTests(unittest.TestCase):
             self.assertTrue(args.native_way_donor_width)
             self.assertEqual(args.profile, "cwr-ce-ways")
 
+    def test_native_donor_width_reaches_real_milestone9_spec_constructor(self) -> None:
+        """Exercise CLI -> Milestone9Spec, not just argparse flag parsing."""
+        from cwr_worldgen import cli
+        from cwr_worldgen.milestone9 import Milestone9Spec
+
+        values = default_gui_values()
+        values.update({
+            "profile": "cwr-ce-ways",
+            "native_way_donor_width": True,
+        })
+        gui_command = build_milestone9_command(values, python="python")
+        # Run the exact GUI-generated command through CLI dispatch. No actual
+        # world build is needed to expose a missing dataclass constructor field.
+        command = gui_command[gui_command.index("milestone9"):]
+        with patch.object(cli, "build_milestone9") as build, patch.object(
+            cli, "_print_result",
+        ):
+            self.assertEqual(cli.main(command), 0)
+        spec = build.call_args.args[1]
+        self.assertIsInstance(spec, Milestone9Spec)
+        self.assertTrue(spec.native_way_donor_width)
+        self.assertEqual(spec.profile, "cwr-ce-ways")
+
+        # Unchecking remains a valid no-op default in the actual constructor.
+        values["native_way_donor_width"] = False
+        command = build_milestone9_command(values, python="python")
+        command = command[command.index("milestone9"):]
+        with patch.object(cli, "build_milestone9") as build, patch.object(
+            cli, "_print_result",
+        ):
+            self.assertEqual(cli.main(command), 0)
+        self.assertFalse(build.call_args.args[1].native_way_donor_width)
+
+    def test_native_donor_width_accepted_by_all_frozen_milestone_specs(self) -> None:
+        from cwr_worldgen.source_pipeline import Milestone5Spec
+        from cwr_worldgen.milestone6 import Milestone6Spec
+        from cwr_worldgen.milestone7 import Milestone7Spec
+        from cwr_worldgen.milestone8 import Milestone8Spec
+        from cwr_worldgen.milestone9 import Milestone9Spec
+        for spec_type in (
+            Milestone5Spec, Milestone6Spec, Milestone7Spec,
+            Milestone8Spec, Milestone9Spec,
+        ):
+            with self.subTest(spec=spec_type.__name__):
+                self.assertTrue(spec_type(
+                    source_dir=Path("."), native_way_donor_width=True,
+                ).native_way_donor_width)
+                self.assertFalse(spec_type(source_dir=Path(".")).native_way_donor_width)
+
     def test_native_way_donor_width_is_optional_and_saved_in_gui_commands(self) -> None:
         defaults = default_gui_values()
         defaults["profile"] = "cwr-ce-ways"
