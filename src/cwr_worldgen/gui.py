@@ -486,6 +486,8 @@ def defaults_with_recent_source(
         result["odol_buildings"] = state["odol_buildings"]
     if type(state.get("binarize_config")) is bool:
         result["binarize_config"] = state["binarize_config"]
+    if type(state.get("native_way_donor_width")) is bool:
+        result["native_way_donor_width"] = state["native_way_donor_width"]
     # Game profile is a GUI preference, not the saved-profile file itself.
     # Reject invalid/stale values rather than passing them into builds.
     if isinstance(state.get("profile"), str) and state["profile"] in {
@@ -782,6 +784,7 @@ def build_milestone9_command(values: dict[str, object], python: str | None = Non
         "strict_assets": "--strict-assets",
         "keep_output": "--keep-output",
         "include_minor_roads": "--include-minor-roads",
+        "native_way_donor_width": "--native-way-donor-width",
         "cache_refresh": "--cache-refresh",
         "no_cache": "--no-cache",
         "normalization_refresh": "--normalization-refresh",
@@ -1083,6 +1086,7 @@ def default_gui_values() -> dict[str, object]:
         "osm_asset_mapping_global_textures": "",
         "keep_output": False,
         "include_minor_roads": True,
+        "native_way_donor_width": False,
         **DEFAULT_ROAD_MODEL_VALUES,
         "fence_donor_model": "",
         "fence_donor_length": "",
@@ -1418,6 +1422,7 @@ class WorldgenGui(tk.Tk):
 
     def _install_road_asset_state_persistence(self) -> None:
         for key in (
+            "native_way_donor_width",
             "paved_road_model",
             "paved_road_curve_model",
             "gravel_road_model",
@@ -1451,7 +1456,8 @@ class WorldgenGui(tk.Tk):
         values: dict[str, object] = {
             key: self.vars[key].get()
             for key in (
-                "paved_road_model",
+                "native_way_donor_width",
+            "paved_road_model",
                 "paved_road_curve_model",
                 "gravel_road_model",
                 "gravel_road_curve_model",
@@ -2512,6 +2518,22 @@ class WorldgenGui(tk.Tk):
         self._entry_row(
             road_models, 6, "Dirt-track curve P3D (optional)", "dirt_road_curve_model", advanced=True
         )
+        keep_width = ttk.Checkbutton(
+            road_models,
+            text="Keep donor road width (CWR-CE native .ways only)",
+            variable=self._var("native_way_donor_width", False, boolean=True),
+        )
+        keep_width.grid(row=7, column=0, columnspan=3, sticky="w", pady=(7, 1))
+        self._register_advanced_setting(
+            "native_way_donor_width", keep_width,
+            normal_style="TCheckbutton", changed_style="AdvancedChanged.TCheckbutton",
+        )
+        ttk.Label(
+            road_models,
+            text="Uses the P3D's measured connector width for paved, dirt and gravel; "
+                 "requires all three donor models in Asset roots. Unchecked uses OSM road widths.",
+            style="Hint.TLabel", wraplength=760,
+        ).grid(row=8, column=0, columnspan=3, sticky="w", pady=(0, 3))
 
         fence_models = ttk.LabelFrame(advanced.body, text="Fence model donors", padding=10)
         fence_models.pack(fill="x", pady=(0, 10))
