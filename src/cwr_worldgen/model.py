@@ -353,6 +353,7 @@ class OsmSpec(HeightmapSpec):
     # callers retain the historical hard/truncating limits unless they opt in.
     advisory_object_limits: bool = False
     include_minor_roads: bool = False
+    native_way_donor_width: bool = False
     procedural_gravel_roads: bool = False
     paved_road_model: str = r"o\road\sil25.p3d"
     paved_road_curve_model: str = ""
