@@ -1490,6 +1490,7 @@ class Milestone5Spec:
     display_name: str = "CWR Milestone 5"
     profile: str = "cwa"
     include_minor_roads: bool = False
+    native_way_donor_width: bool = False
     forest_road_clearance: float = 0.0
     building_ground_clearance: float = 0.10
     forest_ground_clearance: float = 0.15
@@ -1582,6 +1583,7 @@ def build_milestone5(output_dir: Path, spec: Milestone5Spec, *, clean: bool = Tr
         point_building_footprint=spec.point_building_footprint,
         max_forest_objects=spec.max_forest_objects,
         include_minor_roads=spec.include_minor_roads,
+        native_way_donor_width=spec.native_way_donor_width,
         road_connection_tolerance=spec.road_connection_tolerance,
         maximum_road_grade_percent=spec.maximum_road_grade_percent,
         road_grade_radius=spec.road_grade_radius,
