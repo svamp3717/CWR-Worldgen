@@ -2382,6 +2382,30 @@ def _modded_road_variant_availability(
     return result
 
 
+def _native_way_donor_width(record: object, surface: str) -> float:
+    """Read the effective roadway width from the selected P3D's connectors.
+
+    If the model has no explicit connector span, fall back to its measured
+    visible width. Never use the arbitrary OSM width when strict donor-width
+    mode is selected.
+    """
+    try:
+        donor_bytes = read_asset_record_bytes(record)
+        geometry = inspect_visual_model_dimensions(donor_bytes)
+        width = float(
+            geometry.connector_width_metres
+            if geometry.connector_width_metres is not None
+            else geometry.width_metres
+        )
+    except (OSError, ValueError, ProxyCloneError, FileNotFoundError, TypeError) as exc:
+        raise ValueError(
+            f"Could not measure {surface} native-way P3D donor width: {exc}"
+        ) from exc
+    if not math.isfinite(width) or not 0.5 <= width <= 50.0:
+        raise ValueError(f"Invalid {surface} native-way P3D donor width: {width!r}")
+    return width
+
+
 def _modded_road_model_dimensions(
     spec: PlayabilitySpec,
     effective_donors: dict[str, str] | None = None,
@@ -4825,28 +4849,10 @@ def build_milestone4(
 
     native_way_widths: dict[str, float] = {}
     if is_osm_ways_profile(spec.profile) and spec.native_way_donor_width:
-        # Never substitute an OSM width silently when the opt-in promises
-        # exact connector widths from the game's P3D donor meshes.
-        # Measure any installed donors. The native writer checks only the
-        # surfaces actually exported; unused surface families need no P3D.
+        # The native writer requires a measured width for each actually
+        # exported surface; unused road types need no donor in Asset roots.
         for surface, record in native_way_donor_records.items():
-            try:
-                donor_bytes = read_asset_record_bytes(record)
-                geometry = inspect_visual_model_dimensions(donor_bytes)
-                measured_width = float(
-                    geometry.connector_width_metres
-                    if geometry.connector_width_metres is not None
-                    else geometry.width_metres
-                )
-            except (OSError, ValueError, ProxyCloneError, FileNotFoundError) as exc:
-                raise ValueError(
-                    f"Could not measure {surface} native-way P3D donor width: {exc}"
-                ) from exc
-            if not math.isfinite(measured_width) or not 0.5 <= measured_width <= 50.0:
-                raise ValueError(
-                    f"Invalid {surface} native-way P3D donor width: {measured_width!r}"
-                )
-            native_way_widths[surface] = measured_width
+            native_way_widths[surface] = _native_way_donor_width(record, surface)
 
     if generated_infrastructure_usage:
         infrastructure_library = ProceduralInfrastructureLibrary(
