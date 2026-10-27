@@ -761,6 +761,7 @@ def write_osm_road_ways(
     surface_textures: Mapping[str, str],
     surface_donors: Mapping[str, str] | None = None,
     surface_widths: Mapping[str, float] | None = None,
+    require_donor_widths: bool = False,
     bridge_objects: Sequence[object] = (),
 ) -> dict[str, object]:
     """Export terrain-following non-bridge roads as a deterministic sidecar.
@@ -846,6 +847,18 @@ def write_osm_road_ways(
             else:
                 source_runs.append((owner, tags, effective_width(tags), run))
 
+    if require_donor_widths:
+        missing = sorted({
+            _surface(tags)
+            for _, tags, _, _ in source_runs
+            if _surface(tags) not in resolved_widths
+        })
+        if missing:
+            raise ValueError(
+                "Keep donor road width requires measurable P3D donors in Asset "
+                "roots for used road surfaces: " + ", ".join(missing)
+            )
+
     original_run_count = len(source_runs)
     # Bridge/tunnel models are not native ribbons; preserve their approaches.
     non_ground_points = {
@@ -921,5 +934,6 @@ def write_osm_road_ways(
         "merged_road_chains": len(source_runs),
         "surface_sources": sources,
         "surface_widths": resolved_widths,
+        "keep_donor_road_width": require_donor_widths,
         "format": "cwr-ce-osm-ways-v1",
     }
