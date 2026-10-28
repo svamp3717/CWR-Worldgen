@@ -79,5 +79,11 @@ topology reaches actual model placement rather than stopping at a map preview.
 It does **not** prove a reduction in grass seams in CWA until game-rendered
 A/B screenshots are compared.
 
+A second flat-map A/B check uses two dirt through-roads intersecting
+geometrically without an explicit OSM connection. Control emitted 32 road
+objects and zero junction caps; the experiment emitted 39 road objects
+and one junction cap. Both builds reported zero failed connections.
+
 The branch-scoped GitHub Actions workflow also runs the paved-junction,
-gravel-gap, and road-quality regression suites.
+gravel-gap, and road-quality regression suites. The expanded suite passed
+68 checks, with three additional end-to-end fixture checks passing.
