@@ -249,6 +249,12 @@ try:
 except ImportError:
     pass
 
+from .road_paint_snap_policy import (
+    install_road_paint_snap_policy as _install_road_paint_snap_policy,
+)
+
+_install_road_paint_snap_policy()
+
 __all__ = [
     "__version__",
     "BuildResult",
