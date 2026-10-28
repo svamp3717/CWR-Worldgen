@@ -14,15 +14,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
       - name: Install road-fitter test dependencies
         run: python -m pip install -e . pytest
       - name: Compile experimental policy and test modules
-        run: python -m compileall -q src/cwr_worldgen/road_paint_snap_policy.py src/cwr_worldgen/road_paint_town_policy.py tests/test_road_paint_snap_policy.py tests/test_road_paint_town_policy.py
+        run: python -m compileall -q src/cwr_worldgen/road_paint_snap_policy.py src/cwr_worldgen/road_paint_town_policy.py tests/test_road_paint_snap_policy.py tests/test_road_paint_town_policy.py tests/test_road_paint_worldgen_integration.py
       - name: Check experimental joins and existing junctions
         run: |
           pytest -q \
