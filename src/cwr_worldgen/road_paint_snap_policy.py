@@ -130,29 +130,63 @@ def snap_loose_road_ends(
     return tuple(tuple(line) for line in corrected)
 
 
+def _project_without_duplicate_city_streets(dataset, projection, spec):
+    """Exclude redundant whole street traces *before* creating T/X junctions.
+
+    Removing duplicates only after the synthetic-junction planner has run is
+    too late: two 25 cm offset avenue traces intersecting another road can
+    produce four overlapping junction candidates around one true crossing.
+    """
+    from dataclasses import is_dataclass, replace
+    from .city_road_overlap_policy import suppress_coincident_street_strokes
+
+    # Lightweight callers can supply a projected-line test double. Production
+    # datasets are immutable dataclasses with an explicit roads collection.
+    if projection is None or not is_dataclass(dataset):
+        original = _ORIGINAL_PROJECT(dataset, projection, spec)
+        return suppress_coincident_street_strokes(dataset, original, spec)
+
+    raw = _playability.projected_road_polylines(dataset, projection)
+    distinct = suppress_coincident_street_strokes(dataset, raw, spec)
+    removed = frozenset(
+        index for index, (before, after) in enumerate(zip(raw, distinct))
+        if len(before) >= 2 and len(after) < 2
+    )
+    if not removed:
+        return _ORIGINAL_PROJECT(dataset, projection, spec)
+
+    kept = tuple(
+        feature for index, feature in enumerate(dataset.roads)
+        if index not in removed
+    )
+    slim = replace(dataset, roads=kept)
+    projected = iter(_ORIGINAL_PROJECT(slim, projection, spec))
+    return tuple(
+        () if index in removed else next(projected)
+        for index in range(len(dataset.roads))
+    )
+
+
 def _project_with_joined_strokes(dataset, projection, spec):
-    original = _ORIGINAL_PROJECT(dataset, projection, spec)
     requested = os.environ.get(_ENVIRONMENT_FLAG, "").strip()
     if not requested:
-        return original
+        return _ORIGINAL_PROJECT(dataset, projection, spec)
     try:
         reach = float(requested)
     except ValueError:
-        return original
+        return _ORIGINAL_PROJECT(dataset, projection, spec)
     if not math.isfinite(reach) or reach <= 0.0:
-        return original
+        return _ORIGINAL_PROJECT(dataset, projection, spec)
+
     from .road_paint_town_policy import (
         snap_town_road_crossings,
         snap_town_road_mouths,
     )
 
-    from .city_road_overlap_policy import suppress_coincident_street_strokes
-
-    distinct = suppress_coincident_street_strokes(dataset, original, spec)
+    distinct = _project_without_duplicate_city_streets(dataset, projection, spec)
     joined = snap_loose_road_ends(dataset, distinct, spec, reach_metres=reach)
     joined = snap_town_road_mouths(dataset, joined, spec, reach_metres=reach)
     return snap_town_road_crossings(dataset, joined, spec)
-
 
 def install_road_paint_snap_policy() -> None:
     global _INSTALLED
