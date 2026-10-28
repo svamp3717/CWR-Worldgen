@@ -184,3 +184,12 @@ def test_sparse_city_network_is_not_suppressed():
         _dataset(*(ROAD for _ in lines)), lines, _spec(),
     )
     assert result == lines
+
+
+
+def test_opposite_direction_oneway_carriageways_are_preserved():
+    road = {**ROAD, "oneway": "yes"}
+    first, reversed_second = _straight(), tuple(reversed(_straight(z=0.20)))
+    assert city.suppress_coincident_street_strokes(
+        _dataset(road, road), (first, reversed_second), _spec(),
+    ) == (first, reversed_second)
