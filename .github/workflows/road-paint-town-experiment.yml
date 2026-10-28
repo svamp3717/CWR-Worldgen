@@ -28,6 +28,9 @@ jobs:
           pytest -q \
             tests/test_road_paint_snap_policy.py \
             tests/test_road_paint_town_policy.py \
+            tests/test_road_paint_worldgen_integration.py \
             tests/test_synthetic_paved_junctions.py \
             tests/test_gravel_gap_policy.py \
             tests/test_road_quality_policy.py
+      - name: Print town-road real fitter A/B comparison
+        run: pytest -q -s tests/test_road_paint_worldgen_integration.py
