@@ -146,7 +146,10 @@ def _project_with_joined_strokes(dataset, projection, spec):
         snap_town_road_mouths,
     )
 
-    joined = snap_loose_road_ends(dataset, original, spec, reach_metres=reach)
+    from .city_road_overlap_policy import suppress_coincident_street_strokes
+
+    distinct = suppress_coincident_street_strokes(dataset, original, spec)
+    joined = snap_loose_road_ends(dataset, distinct, spec, reach_metres=reach)
     joined = snap_town_road_mouths(dataset, joined, spec, reach_metres=reach)
     return snap_town_road_crossings(dataset, joined, spec)
 
