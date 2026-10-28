@@ -141,7 +141,10 @@ def _project_with_joined_strokes(dataset, projection, spec):
         return original
     if not math.isfinite(reach) or reach <= 0.0:
         return original
-    return snap_loose_road_ends(dataset, original, spec, reach_metres=reach)
+    from .road_paint_town_policy import snap_town_road_mouths
+
+    joined = snap_loose_road_ends(dataset, original, spec, reach_metres=reach)
+    return snap_town_road_mouths(dataset, joined, spec, reach_metres=reach)
 
 
 def install_road_paint_snap_policy() -> None:
