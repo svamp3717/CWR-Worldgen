@@ -51,12 +51,14 @@ def snap_loose_road_ends(
     or mixed-surface joins. Ambiguous multiway ends are intentionally left alone.
     """
     original = tuple(tuple(line) for line in polylines)
-    reach = min(_MAXIMUM_REACH_METRES, max(0.0, float(reach_metres)))
-    if not math.isfinite(reach) or reach <= 0.0 or len(original) != len(dataset.roads):
+    requested = float(reach_metres)
+    if not math.isfinite(requested) or requested <= 0.0 or len(original) != len(dataset.roads):
         return original
+    reach = min(_MAXIMUM_REACH_METRES, requested)
 
     endpoints = []
     buckets = defaultdict(list)
+    surface_cache = {}
     for feature_index, (feature, line) in enumerate(zip(dataset.roads, original)):
         if len(line) < 2 or not _at_grade(feature.tags):
             continue
@@ -64,9 +66,10 @@ def snap_loose_road_ends(
             feature.tags, include_minor=spec.include_minor_roads,
         ):
             continue
-        surface = _playability.road_model_surface(
-            spec, _playability.road_model_for_tags(spec, feature.tags),
-        )
+        model = _playability.road_model_for_tags(spec, feature.tags)
+        if model not in surface_cache:
+            surface_cache[model] = _playability.road_model_surface(spec, model)
+        surface = surface_cache[model]
         if surface is None:
             continue
         for start in (True, False):
@@ -107,6 +110,8 @@ def snap_loose_road_ends(
                     candidates[index].append(other_index)
                     candidates[other_index].append(index)
 
+    if not candidates:
+        return original
     corrected = [list(line) for line in original]
     for index, matches in sorted(candidates.items()):
         if len(matches) != 1:
