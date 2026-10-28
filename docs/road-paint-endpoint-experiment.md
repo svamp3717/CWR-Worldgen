@@ -49,7 +49,9 @@ terrain fit. No new model assets are introduced.
 ## Dense city overlap prevention
 
 The same opt-in environment switch now enables two additional overlap
-safeguards after the projected roads have been prepared:
+safeguards. Duplicate whole-street suppression runs on raw projected lines
+**before** synthetic junction discovery, so a copied city avenue cannot
+create a stack of almost-coincident T/X hubs:
 
 - **Whole-street duplicate suppression:** nearby copies of an otherwise
   identical road stroke are emitted only once when both ends match within
@@ -133,3 +135,8 @@ generated ribbon preference already fail on the unchanged base
 implementation; the branch runs the other 43 tests in that module and
 leaves those two unchanged. They require an independent fitting-policy
 fix before being used as a merge gate.
+
+The dense four-way overlap fixture specifically checks two perpendicular
+paved avenues, each duplicated with a 0.25 m offset. Filtering these input
+lines before constructing synthetic junctions is essential: filtering after
+junction construction can retain four near-identical crossing candidates.
