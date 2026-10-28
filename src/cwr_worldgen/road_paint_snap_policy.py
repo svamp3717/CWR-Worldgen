@@ -67,6 +67,8 @@ def snap_loose_road_ends(
         surface = _playability.road_model_surface(
             spec, _playability.road_model_for_tags(spec, feature.tags),
         )
+        if surface is None:
+            continue
         for start in (True, False):
             outgoing = _outgoing(line, start)
             if outgoing is None:
