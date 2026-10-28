@@ -110,6 +110,10 @@ def suppress_coincident_street_strokes(dataset, polylines, spec, *, tolerance_me
                 continue
             other = original[other_index]
             reverse = math.dist(source[0], other[-1]) < math.dist(source[0], other[0])
+            # Oppositely traced explicit one-way ways may be separate traffic
+            # carriageways even if their centre-lines nearly coincide.
+            if reverse and identity[2] in ("yes", "true", "1", "-1"):
+                continue
             if (
                 math.dist(source[0], other[-1] if reverse else other[0]) > tolerance
                 or math.dist(source[-1], other[0] if reverse else other[-1]) > tolerance
