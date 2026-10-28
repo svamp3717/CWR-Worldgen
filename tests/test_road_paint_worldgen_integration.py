@@ -63,10 +63,49 @@ def test_town_fitter_accepts_repaired_road_network(monkeypatch):
     repaired = playability.fit_road_objects(data, projection, heights, spec)
     assert repaired.objects
     assert not repaired.truncated
+    assert repaired.junction_cap_objects == baseline.junction_cap_objects + 1
+    assert repaired.failed_connections <= baseline.failed_connections
     print(
         "Town A/B:",
         "control=", (len(baseline.objects), baseline.junction_cap_objects,
                      baseline.failed_connections, baseline.maximum_connection_gap),
         "repair=", (len(repaired.objects), repaired.junction_cap_objects,
                     repaired.failed_connections, repaired.maximum_connection_gap),
+    )
+
+
+
+def test_town_four_way_crossing_builds_one_real_junction_cap(monkeypatch):
+    from dataclasses import replace
+    from cwr_worldgen import paved_junction_policy as paved
+
+    data, projection, spec = _town()
+    cross = OsmLineFeature(
+        "way/cross", data.roads[0].tags,
+        tuple(projection.to_latlon(point) for point in (
+            (500.0, 300.0), (500.0, 700.0),
+        )),
+    )
+    data = replace(data, roads=(data.roads[0], cross))
+    key = playability._road_node_key((500.0, 500.0))
+    heights = [0.0] * (spec.cells * spec.cells)
+
+    monkeypatch.delenv("CWR_ROAD_PAINT_SNAP_METRES", raising=False)
+    assert key not in paved._ORIGINAL_GEOMETRY(data, projection, spec)
+    baseline = playability.fit_road_objects(data, projection, heights, spec)
+
+    monkeypatch.setenv("CWR_ROAD_PAINT_SNAP_METRES", "2.5")
+    geometry = paved._ORIGINAL_GEOMETRY(data, projection, spec)
+    assert key in geometry
+    assert len(geometry[key].directions) == 4
+    repaired = playability.fit_road_objects(data, projection, heights, spec)
+    assert repaired.junction_cap_objects == baseline.junction_cap_objects + 1
+    assert repaired.failed_connections <= baseline.failed_connections
+    assert not repaired.truncated
+    print(
+        "Town X A/B:",
+        "control=", (len(baseline.objects), baseline.junction_cap_objects,
+                     baseline.failed_connections),
+        "repair=", (len(repaired.objects), repaired.junction_cap_objects,
+                    repaired.failed_connections),
     )
