@@ -255,6 +255,10 @@ from .road_paint_snap_policy import (
 
 _install_road_paint_snap_policy()
 
+from .city_road_overlap_policy import install_city_overlap_policy as _install_city_overlap_policy
+
+_install_city_overlap_policy()
+
 __all__ = [
     "__version__",
     "BuildResult",
