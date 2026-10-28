@@ -109,3 +109,44 @@ def test_town_four_way_crossing_builds_one_real_junction_cap(monkeypatch):
         "repair=", (len(repaired.objects), repaired.junction_cap_objects,
                     repaired.failed_connections),
     )
+
+
+
+def test_duplicate_city_streets_fit_once_without_stacked_pavement(monkeypatch):
+    from dataclasses import replace
+
+    data, projection, spec = _town()
+    paved_tags = {"highway": "residential", "surface": "asphalt"}
+
+    def street(key, offset):
+        return OsmLineFeature(
+            key, paved_tags,
+            tuple(projection.to_latlon(point) for point in (
+                (250.0, 500.0 + offset),
+                (500.0, 500.0 + offset),
+                (750.0, 500.0 + offset),
+            )),
+        )
+
+    primary = street("way/city-avenue", 0.0)
+    duplicate = street("way/city-avenue-duplicate", 0.30)
+    single = replace(data, roads=(primary,))
+    doubled = replace(data, roads=(primary, duplicate))
+    heights = [0.0] * (spec.cells * spec.cells)
+
+    monkeypatch.setenv("CWR_ROAD_PAINT_SNAP_METRES", "2.5")
+    projected = playability._paved_junction_augmented_polylines(
+        doubled, projection, spec,
+    )
+    assert sum(len(line) >= 2 for line in projected) == 1
+    single_fit = playability.fit_road_objects(
+        single, projection, heights, spec,
+    )
+    doubled_fit = playability.fit_road_objects(
+        doubled, projection, heights, spec,
+    )
+    assert len(doubled_fit.objects) == len(single_fit.objects)
+    assert doubled_fit.junction_cap_objects == single_fit.junction_cap_objects
+    assert doubled_fit.failed_connections <= single_fit.failed_connections
+    print("City duplicate A/B:", "single=", len(single_fit.objects),
+          "duplicate=", len(doubled_fit.objects))
