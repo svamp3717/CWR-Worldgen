@@ -140,3 +140,83 @@ def test_no_spurious_connections_across_sparse_town_grid():
     assert town.snap_town_road_mouths(
         _data(*tags), lines, _spec(), reach_metres=2.5,
     ) == lines
+
+
+
+def test_unconnected_dirt_town_crossing_gets_shared_x_junction():
+    lines = (
+        ((0.0, 20.0), (60.0, 20.0)),
+        ((30.0, 0.0), (30.0, 40.0)),
+    )
+    data, spec = _data(_DIRT, _DIRT), _spec()
+    changed = town.snap_town_road_crossings(data, lines, spec)
+    assert changed[0] == ((0.0, 20.0), (30.0, 20.0), (60.0, 20.0))
+    assert changed[1] == ((30.0, 0.0), (30.0, 20.0), (30.0, 40.0))
+    assert town.snap_town_road_crossings(data, changed, spec) == changed
+
+
+def test_unconnected_gravel_town_crossing_gets_shared_x_junction():
+    lines = (
+        ((0.0, 20.0), (60.0, 20.0)),
+        ((30.0, 0.0), (30.0, 40.0)),
+    )
+    changed = town.snap_town_road_crossings(
+        _data(_GRAVEL, _GRAVEL), lines, _spec(),
+    )
+    assert changed[0][1] == changed[1][1] == (30.0, 20.0)
+
+
+def test_town_crossing_does_not_join_mixed_surface_or_bridge():
+    lines = (
+        ((0.0, 20.0), (60.0, 20.0)),
+        ((30.0, 0.0), (30.0, 40.0)),
+    )
+    for other in (_PAVED, _GRAVEL, {**_DIRT, "bridge": "yes"}, {**_DIRT, "layer": "1"}):
+        assert town.snap_town_road_crossings(
+            _data(_DIRT, other), lines, _spec(),
+        ) == lines
+
+
+def test_paved_town_x_stays_owned_by_original_junction_planner():
+    lines = (
+        ((0.0, 20.0), (60.0, 20.0)),
+        ((30.0, 0.0), (30.0, 40.0)),
+    )
+    assert town.snap_town_road_crossings(
+        _data(_PAVED, _PAVED), lines, _spec(),
+    ) == lines
+
+
+def test_multiway_geometric_crossing_not_invented_as_invalid_hub():
+    lines = (
+        ((0.0, 20.0), (60.0, 20.0)),
+        ((30.0, 0.0), (30.0, 40.0)),
+        ((0.0, 0.0), (60.0, 40.0)),
+    )
+    assert town.snap_town_road_crossings(
+        _data(_DIRT, _DIRT, _DIRT), lines, _spec(),
+    ) == lines
+
+
+def test_shallow_angle_crossing_remains_independent():
+    lines = (
+        ((0.0, 20.0), (60.0, 20.0)),
+        ((0.0, 15.0), (60.0, 25.0)),
+    )
+    assert town.snap_town_road_crossings(
+        _data(_DIRT, _DIRT), lines, _spec(),
+    ) == lines
+
+
+def test_crossings_remain_disabled_when_road_paint_environment_is_unset(monkeypatch):
+    lines = (
+        ((0.0, 20.0), (60.0, 20.0)),
+        ((30.0, 0.0), (30.0, 40.0)),
+    )
+    data, spec = _data(_DIRT, _DIRT), _spec()
+    monkeypatch.setattr(painting, "_ORIGINAL_PROJECT", lambda d, p, s: lines)
+    monkeypatch.delenv("CWR_ROAD_PAINT_SNAP_METRES", raising=False)
+    assert painting._project_with_joined_strokes(data, None, spec) is lines
+    monkeypatch.setenv("CWR_ROAD_PAINT_SNAP_METRES", "2.5")
+    changed = painting._project_with_joined_strokes(data, None, spec)
+    assert changed[0][1] == changed[1][1] == (30.0, 20.0)
