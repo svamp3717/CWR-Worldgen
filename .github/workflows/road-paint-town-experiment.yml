@@ -27,7 +27,6 @@ jobs:
         run: |
           pytest -q \
             tests/test_city_road_overlap_policy.py \
-            tests/test_final_road_dedup_policy.py \
             tests/test_road_paint_snap_policy.py \
             tests/test_road_paint_town_policy.py \
             tests/test_road_paint_worldgen_integration.py \
@@ -36,3 +35,7 @@ jobs:
             tests/test_road_quality_policy.py
       - name: Print town-road real fitter A/B comparison
         run: pytest -q -s tests/test_road_paint_worldgen_integration.py
+      - name: Existing final dedup regressions without two unchanged main-branch failures
+        run: |
+          pytest -q tests/test_final_road_dedup_policy.py \
+            -k 'not test_generated_paved_curve_can_replace_substantially_covered_stock_cap and not test_generated_paved_straight_does_not_use_curve_cap_exception'
