@@ -91,7 +91,6 @@ def suppress_coincident_street_strokes(dataset, polylines, spec, *, tolerance_me
     # retains junction vertices when one duplicate has an explicit branch.
     candidates.sort(key=lambda entry: (-len(original[entry[0]]), entry[0]))
     by_endpoint = defaultdict(list)
-    retained = set()
     dropped = set()
 
     def bucket(point):
@@ -106,7 +105,7 @@ def suppress_coincident_street_strokes(dataset, polylines, spec, *, tolerance_me
             for dz in (-1, 0, 1):
                 nearby.update(by_endpoint.get((bx + dx, bz + dz), ()))
         duplicate = False
-        for other_index, other_identity, other_surface, other_length, other_samples in nearby:
+        for other_index, other_identity, other_surface, other_length, other_samples in sorted(nearby, key=lambda item: item[0]):
             if identity != other_identity or surface != other_surface:
                 continue
             other = original[other_index]
@@ -141,10 +140,9 @@ def suppress_coincident_street_strokes(dataset, polylines, spec, *, tolerance_me
         if duplicate:
             dropped.add(index)
         else:
-            retained.add(index)
-            by_endpoint[bucket(source[0])].append(
-                (index, identity, surface, length, samples)
-            )
+            entry = (index, identity, surface, length, samples)
+            by_endpoint[bucket(source[0])].append(entry)
+            by_endpoint[bucket(source[-1])].append(entry)
     if not dropped:
         return original
     return tuple(() if index in dropped else line for index, line in enumerate(original))
