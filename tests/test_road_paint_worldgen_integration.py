@@ -41,19 +41,17 @@ def test_town_mouth_becomes_a_true_junction_in_worldgen(monkeypatch):
     data, projection, spec = _town()
     key = playability._road_node_key((500.0, 500.0))
     monkeypatch.delenv("CWR_ROAD_PAINT_SNAP_METRES", raising=False)
-    baseline = quality._junction_geometry(data, projection, spec)
+    from cwr_worldgen import paved_junction_policy as paved
+
+    # Inspect the unfiltered road topology. The stock-paved junction planner
+    # intentionally excludes dirt/gravel hubs from its reservation table.
+    baseline = paved._ORIGINAL_GEOMETRY(data, projection, spec)
     assert key not in baseline
     monkeypatch.setenv("CWR_ROAD_PAINT_SNAP_METRES", "2.5")
-    repaired = quality._junction_geometry(data, projection, spec)
-    from cwr_worldgen import road_paint_town_policy as town
-    from cwr_worldgen import road_paint_snap_policy as snap
-    raw = snap._ORIGINAL_PROJECT(data, projection, spec)
-    print("town-debug", "original=", raw, "patched=", playability._paved_junction_augmented_polylines(data, projection, spec),
-          "direct=", town.snap_town_road_mouths(data, raw, spec, reach_metres=2.5),
-          "road-surface=", playability.road_model_surface(spec, playability.road_model_for_tags(spec, data.roads[0].tags)),
-          "junctions=", repaired)
+    repaired = paved._ORIGINAL_GEOMETRY(data, projection, spec)
     assert key in repaired
     assert len(repaired[key].directions) == 3
+    assert key not in quality._junction_geometry(data, projection, spec)
 
 
 def test_town_fitter_accepts_repaired_road_network(monkeypatch):
