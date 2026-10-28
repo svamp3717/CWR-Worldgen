@@ -150,3 +150,39 @@ def test_duplicate_city_streets_fit_once_without_stacked_pavement(monkeypatch):
     assert doubled_fit.failed_connections <= single_fit.failed_connections
     print("City duplicate A/B:", "single=", len(single_fit.objects),
           "duplicate=", len(doubled_fit.objects))
+
+
+
+def test_near_duplicate_city_avenue_does_not_split_real_t_junction_twice(monkeypatch):
+    from dataclasses import replace
+
+    data, projection, spec = _town()
+    tags = {"highway": "residential", "surface": "asphalt"}
+
+    def way(key, points):
+        return OsmLineFeature(
+            key, tags, tuple(projection.to_latlon(point) for point in points),
+        )
+
+    main = way("way/main", ((300.0, 500.0), (700.0, 500.0)))
+    double = way("way/duplicate", ((300.0, 500.3), (700.0, 500.3)))
+    branch = way("way/branch", ((500.0, 300.0), (500.0, 500.0)))
+    single = replace(data, roads=(main, branch))
+    double_set = replace(data, roads=(main, double, branch))
+    monkeypatch.setenv("CWR_ROAD_PAINT_SNAP_METRES", "2.5")
+    projected = playability._paved_junction_augmented_polylines(
+        double_set, projection, spec,
+    )
+    assert len(projected[1]) < 2
+    key = playability._road_node_key((500.0, 500.0))
+    assert key in {playability._road_node_key(point) for point in projected[0]}
+    assert key in {playability._road_node_key(point) for point in projected[2]}
+
+    heights = [0.0] * (spec.cells * spec.cells)
+    baseline = playability.fit_road_objects(single, projection, heights, spec)
+    result = playability.fit_road_objects(double_set, projection, heights, spec)
+    assert result.junction_cap_objects == baseline.junction_cap_objects
+    assert result.failed_connections <= baseline.failed_connections
+    assert len(result.objects) <= len(baseline.objects) + 1
+    print("City T duplicate A/B:", "single=", len(baseline.objects),
+          "duplicate=", len(result.objects))
