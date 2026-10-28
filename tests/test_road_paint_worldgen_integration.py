@@ -45,6 +45,13 @@ def test_town_mouth_becomes_a_true_junction_in_worldgen(monkeypatch):
     assert key not in baseline
     monkeypatch.setenv("CWR_ROAD_PAINT_SNAP_METRES", "2.5")
     repaired = quality._junction_geometry(data, projection, spec)
+    from cwr_worldgen import road_paint_town_policy as town
+    from cwr_worldgen import road_paint_snap_policy as snap
+    raw = snap._ORIGINAL_PROJECT(data, projection, spec)
+    print("town-debug", "original=", raw, "patched=", playability._paved_junction_augmented_polylines(data, projection, spec),
+          "direct=", town.snap_town_road_mouths(data, raw, spec, reach_metres=2.5),
+          "road-surface=", playability.road_model_surface(spec, playability.road_model_for_tags(spec, data.roads[0].tags)),
+          "junctions=", repaired)
     assert key in repaired
     assert len(repaired[key].directions) == 3
 
