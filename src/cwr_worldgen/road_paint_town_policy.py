@@ -193,3 +193,110 @@ def snap_town_road_mouths(
                 rebuilt.append(end)
         corrected[target] = rebuilt
     return tuple(tuple(line) for line in corrected)
+
+
+def snap_town_road_crossings(
+    dataset, polylines: Sequence[Sequence[tuple[float, float]]], spec,
+) -> tuple[tuple[tuple[float, float], ...], ...]:
+    """Split genuine unconnected dirt/gravel crossings at a shared node.
+
+    Only transverse, at-grade, same-surface pairs are eligible. Endpoints and
+    existing nodes are not moved; paved crossings use their existing planner.
+    """
+    original = tuple(tuple(line) for line in polylines)
+    if len(original) != len(dataset.roads):
+        return original
+    cache = {}
+    segments = []
+    buckets = defaultdict(list)
+    oversized = []
+    intersections = defaultdict(list)
+    for feature, (road, line) in enumerate(zip(dataset.roads, original)):
+        if len(line) < 2 or not _supported(spec, road.tags):
+            continue
+        surface = _surface(spec, road.tags, cache)
+        if surface not in ("dirt", "gravel"):
+            continue
+        for segment, (start, end) in enumerate(zip(line, line[1:])):
+            if not all(math.isfinite(v) for v in (*start, *end)):
+                continue
+            length = math.dist(start, end)
+            if length < 5.0:
+                continue
+            dx = (end[0] - start[0]) / length
+            dz = (end[1] - start[1]) / length
+            index = len(segments)
+            segments.append((feature, segment, start, end, (dx, dz), length, surface))
+            bx0 = math.floor(min(start[0], end[0]) / _BUCKET_METRES)
+            bx1 = math.floor(max(start[0], end[0]) / _BUCKET_METRES)
+            bz0 = math.floor(min(start[1], end[1]) / _BUCKET_METRES)
+            bz1 = math.floor(max(start[1], end[1]) / _BUCKET_METRES)
+            if (bx1 - bx0 + 1) * (bz1 - bz0 + 1) > _MAX_BUCKETS_PER_SEGMENT:
+                oversized.append(index)
+                nearby = range(index)
+            else:
+                nearby = set(oversized)
+                for bx in range(bx0, bx1 + 1):
+                    for bz in range(bz0, bz1 + 1):
+                        nearby.update(buckets.get((bx, bz), ()))
+                        buckets[(bx, bz)].append(index)
+
+            # A very long segment is rare; fall back to comparing previous
+            # segments rather than indexing thousands of grid squares.
+            if index == 0:
+                continue
+            for other in sorted(nearby):
+                other_feature, other_segment, other_start, other_end, other_axis, other_length, other_surface = segments[other]
+                if other_feature == feature or surface != other_surface:
+                    continue
+                if abs(dx * other_axis[0] + dz * other_axis[1]) > _MAXIMUM_PARALLEL_COSINE:
+                    continue
+                intersection = _p._synthetic_junction_segment_intersection(
+                    start, end, other_start, other_end,
+                )
+                if intersection is None:
+                    continue
+                first_fraction, second_fraction, point = intersection
+                margin = max(0.2, min(2.5, length * 0.10))
+                other_margin = max(0.2, min(2.5, other_length * 0.10))
+                if not (
+                    min(first_fraction, 1.0 - first_fraction) * length >= margin
+                    and min(second_fraction, 1.0 - second_fraction) * other_length >= other_margin
+                ):
+                    continue
+                # Collect matches after all segments are scanned so multi-way
+                # geometric crossings can be rejected as a group.
+                key = (int(round(point[0] * 4)), int(round(point[1] * 4)))
+                intersections[key].append((
+                    feature, segment, first_fraction,
+                    other_feature, other_segment, second_fraction, point,
+                ))
+
+    insertions = defaultdict(list)
+    for values in intersections.values():
+        if len(values) != 1:
+            continue
+        first_feature, first_segment, f1, second_feature, second_segment, f2, point = values[0]
+        for feature, segment, fraction in (
+            (first_feature, first_segment, f1),
+            (second_feature, second_segment, f2),
+        ):
+            if any(math.dist(vertex, point) <= 0.05 for vertex in original[feature]):
+                continue
+            insertions[(feature, segment)].append((fraction, point))
+    if not insertions:
+        return original
+    corrected = []
+    for feature, line in enumerate(original):
+        if not line:
+            corrected.append(line)
+            continue
+        rebuilt = [line[0]]
+        for segment, end in enumerate(line[1:]):
+            for _, point in sorted(insertions.get((feature, segment), ())):
+                if math.dist(rebuilt[-1], point) > 0.05:
+                    rebuilt.append(point)
+            if math.dist(rebuilt[-1], end) > 0.05:
+                rebuilt.append(end)
+        corrected.append(tuple(rebuilt))
+    return tuple(corrected)
