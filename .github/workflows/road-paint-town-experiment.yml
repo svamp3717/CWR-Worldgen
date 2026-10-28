@@ -1,0 +1,33 @@
+name: Road Paint Town Experiment
+
+on:
+  push:
+    branches:
+      - experiment/road-paint-endpoint-snapping
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  road-paint-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install road-fitter test dependencies
+        run: python -m pip install -e . pytest
+      - name: Compile experimental policy and test modules
+        run: python -m compileall -q src/cwr_worldgen/road_paint_snap_policy.py src/cwr_worldgen/road_paint_town_policy.py tests/test_road_paint_snap_policy.py tests/test_road_paint_town_policy.py
+      - name: Check experimental joins and existing junctions
+        run: |
+          pytest -q \
+            tests/test_road_paint_snap_policy.py \
+            tests/test_road_paint_town_policy.py \
+            tests/test_synthetic_paved_junctions.py \
+            tests/test_gravel_gap_policy.py \
+            tests/test_road_quality_policy.py
