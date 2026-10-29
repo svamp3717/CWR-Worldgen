@@ -73,6 +73,31 @@ curves are rejected together if their combined path would self-intersect.
 This also handles previously unrounded turns above 135° without adding
 roadway over unsafe shortcuts.
 
+### P3D road-fitter geometry reused for native OSM ways
+
+The native ways exporter now shares the existing P3D road fitter's **road-width
+minimum-radius calculation, feasible tangent budget, and maximum local
+heading-change sampling** (the stock road fit's 15° segment limit).
+
+Before rounding ordinary rural corners, it can repair a tiny, short-leg
+OSM zigzag that cannot physically accommodate the active road width.
+As in the P3D road fitter, the unrepresentable intermediate vertex is
+removed and the remaining road can be rounded. Unlike the original
+P3D-only repair, native ways require the entire simplified centerline
+to stay within **4.5 m** of the original OSM geometry, and the removed
+point itself must be within the tighter width-dependent threshold.
+These are short digitization defects, not genuine hairpins.
+
+The repair is **blocked** at shared intersections, bridge and tunnel
+connections, towns, buildings, water, nearby roads and map boundaries.
+Long bends keep their existing adaptive cubic treatment, and the
+original source still drives terrain grading. With **Keep donor road width**
+enabled, the repair uses the measured P3D donor width rather than the
+OSM width, just like the exported native ways.
+
+The build manifest reports `road_ways.repaired_rural_kinks` separately from
+`road_ways.smoothed_rural_bends`.
+
 The same cautious clearance checks remain: no smoothing at shared junctions,
 inside or near towns and residential areas, or when the changed road ribbon
 would touch buildings, other roads, bridge or tunnel approaches, water/watercourses,
