@@ -987,3 +987,112 @@ def test_sharp_turn_with_adjacent_building_respects_clearance(tmp_path):
         assert not footprint.intersects(building_shape)
     else:
         assert (500, 350) in _way_points(nodes, ways[0])
+
+
+
+def test_native_ways_reuse_p3d_width_aware_repair_for_short_osm_zigzag(tmp_path):
+    """The P3D fitter's curvature check removes a tiny impossible 45° kink."""
+    from shapely.geometry import LineString
+
+    road = OsmLineFeature(
+        "way/tiny_kink", {"highway": "residential", "width": "10"},
+        tuple(_ll(*point) for point in (
+            (200, 300), (240, 300), (243, 303), (283, 303),
+        )),
+    )
+    info, nodes, ways, contents = _export(tmp_path, [road], world_size=1000)
+    points = _way_points(nodes, ways[0])
+    assert info["repaired_rural_kinks"] == 1
+    assert info["ways"] == 1
+    assert points[0] == (200, 300)
+    assert points[-1] == (283, 303)
+    assert (240, 300) not in points
+    original = LineString((
+        (200, 300), (240, 300), (243, 303), (283, 303),
+    ))
+    assert LineString(points).hausdorff_distance(original) <= 4.5
+    assert LineString(points).is_simple
+    assert _export(tmp_path, [road], world_size=1000)[3] == contents
+
+
+def test_p3d_kink_repair_adapts_to_optional_native_donor_width(tmp_path):
+    road = OsmLineFeature(
+        "way/kink", {"highway": "residential", "width": "6"},
+        tuple(_ll(*point) for point in (
+            (200, 300), (240, 300), (243, 303), (283, 303),
+        )),
+    )
+    narrow, nodes, ways, _ = _export(tmp_path, [road], world_size=1000)
+    assert narrow["repaired_rural_kinks"] == 0
+    assert (240, 300) in _way_points(nodes, ways[0])
+
+    wide, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000,
+        surface_widths={"paved": 10.0}, require_donor_widths=True,
+    )
+    assert wide["repaired_rural_kinks"] == 1
+    assert (240, 300) not in _way_points(nodes, ways[0])
+    assert ways[0][1] == 10.0
+
+
+def test_p3d_kink_repair_does_not_remove_connected_junction_node(tmp_path):
+    main = OsmLineFeature(
+        "way/main", {"highway": "residential", "width": "10"},
+        tuple(_ll(*point) for point in (
+            (200, 300), (240, 300), (243, 303), (283, 303),
+        )),
+    )
+    spur = OsmLineFeature(
+        "way/spur", {"highway": "residential"},
+        (_ll(240, 300), _ll(240, 400)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [main, spur], world_size=1000,
+    )
+    assert info["repaired_rural_kinks"] == 0
+    main_nodes = next(_way_points(nodes, way) for way in ways if way[1] == 10.0)
+    assert (240, 300) in main_nodes
+    assert sum((240, 300) in _way_points(nodes, way) for way in ways) == 2
+
+
+def test_p3d_kink_repair_respects_obstacles_and_urban_exclusion(tmp_path):
+    road = OsmLineFeature(
+        "way/obstructed", {"highway": "residential", "width": "10"},
+        tuple(_ll(*point) for point in (
+            (200, 300), (240, 300), (243, 303), (283, 303),
+        )),
+    )
+    building = OsmPolygonFeature(
+        "building/1", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(*point) for point in (
+            (239, 300), (244, 300), (244, 307), (239, 307), (239, 300),
+        ))),),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000,
+        building_polygons=(building,),
+    )
+    assert info["repaired_rural_kinks"] == 0
+    assert (240, 300) in _way_points(nodes, ways[0])
+
+    village = OsmPointFeature(
+        "node/nearby", {"place": "village"}, _ll(240, 300),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000,
+        places=(village,),
+    )
+    assert info["repaired_rural_kinks"] == 0
+    assert (240, 300) in _way_points(nodes, ways[0])
+
+
+def test_p3d_kink_repair_does_not_flatten_true_hairpin(tmp_path):
+    road = OsmLineFeature(
+        "way/hairpin", {"highway": "residential", "width": "10"},
+        tuple(_ll(*point) for point in (
+            (200, 300), (240, 300), (235, 306), (230, 325),
+        )),
+    )
+    info, nodes, ways, _ = _export(tmp_path, [road], world_size=1000)
+    assert info["repaired_rural_kinks"] == 0
+    assert (240, 300) in _way_points(nodes, ways[0])
