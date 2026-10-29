@@ -440,7 +440,7 @@ def test_long_open_approaches_get_a_larger_curve_radius(tmp_path):
     short_trim = 280 - short_pts[1][0]
     long_trim = 400 - long_pts[1][0]
     assert long_trim > short_trim + 5.0
-    assert long_trim <= 38.0 + 0.01
+    assert long_trim <= 52.0 + 0.01
     assert short_pts[0] == long_pts[0] == (200, 200)
     assert short_pts[-1] == (280, 280)
     assert long_pts[-1] == (400, 400)
@@ -898,3 +898,82 @@ def test_donor_width_measurement_rejects_unreadable_or_invalid_p3ds(monkeypatch)
     monkeypatch.setattr(generator, "read_asset_record_bytes", missing)
     with pytest.raises(ValueError, match="Could not measure dirt"):
         generator._native_way_donor_width(object(), "dirt")
+
+
+
+def test_sharp_rural_turn_around_145_degrees_is_rounded_when_open(tmp_path):
+    import math
+    from shapely.geometry import LineString, Point
+
+    b = (500, 350)
+    c = (
+        b[0] + 220 * math.cos(math.radians(145)),
+        b[1] + 220 * math.sin(math.radians(145)),
+    )
+    road = OsmLineFeature(
+        "way/sharp", {"highway": "tertiary"},
+        (_ll(200, 350), _ll(*b), _ll(*c)),
+    )
+    info, nodes, ways, original = _export(
+        tmp_path, [road], world_size=1000,
+    )
+    points = _way_points(nodes, ways[0])
+    assert info["smoothed_rural_bends"] == 1
+    assert info["ways"] == 1
+    assert points[0] == (200, 350)
+    assert points[-1] == pytest.approx(c, abs=0.01)
+    assert b not in points
+    assert LineString(points).is_simple
+    source = LineString(((200, 350), b, c))
+    assert max(source.distance(Point(p)) for p in points) <= 14.01
+    # There is no abrupt 145-degree turn between adjacent road segments.
+    heading_changes = []
+    for p, q, r in zip(points, points[1:], points[2:]):
+        u = (q[0] - p[0], q[1] - p[1])
+        v = (r[0] - q[0], r[1] - q[1])
+        dot = (u[0] * v[0] + u[1] * v[1]) / math.dist(p, q) / math.dist(q, r)
+        heading_changes.append(dot)
+    assert min(heading_changes) > 0.92
+    assert _export(tmp_path, [road], world_size=1000)[3] == original
+
+
+def test_short_but_usable_country_turn_is_rounded_without_moving_ends(tmp_path):
+    road = OsmLineFeature(
+        "way/local", {"highway": "residential"},
+        (_ll(300, 300), _ll(322, 300), _ll(322, 322)),
+    )
+    info, nodes, ways, _ = _export(tmp_path, [road], world_size=1000)
+    points = _way_points(nodes, ways[0])
+    assert info["smoothed_rural_bends"] == 1
+    assert points[0] == (300, 300)
+    assert points[-1] == (322, 322)
+    assert (322, 300) not in points
+
+
+def test_sharp_turn_with_adjacent_building_stays_on_osm_centerline(tmp_path):
+    import math
+
+    b = (500, 350)
+    c = (
+        b[0] + 220 * math.cos(math.radians(145)),
+        b[1] + 220 * math.sin(math.radians(145)),
+    )
+    road = OsmLineFeature(
+        "way/sharp", {"highway": "tertiary"},
+        (_ll(200, 350), _ll(*b), _ll(*c)),
+    )
+    # The building overlaps the inside of the turn, so no width-preserving
+    # arc can be drawn without violating the building setback.
+    building = OsmPolygonFeature(
+        "building/near_bend", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(x, z) for x, z in (
+            (488, 351), (500, 351), (500, 360),
+            (488, 360), (488, 351),
+        ))),),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000,
+        building_polygons=(building,),
+    )
+    assert info["smoothed_rural_bends"] == 0
+    assert (500, 350) in _way_points(nodes, ways[0])
