@@ -950,8 +950,9 @@ def test_short_but_usable_country_turn_is_rounded_without_moving_ends(tmp_path):
     assert (322, 300) not in points
 
 
-def test_sharp_turn_with_adjacent_building_stays_on_osm_centerline(tmp_path):
+def test_sharp_turn_with_adjacent_building_respects_clearance(tmp_path):
     import math
+    from shapely.geometry import LineString, Polygon
 
     b = (500, 350)
     c = (
@@ -962,8 +963,9 @@ def test_sharp_turn_with_adjacent_building_stays_on_osm_centerline(tmp_path):
         "way/sharp", {"highway": "tertiary"},
         (_ll(200, 350), _ll(*b), _ll(*c)),
     )
-    # The building overlaps the inside of the turn, so no width-preserving
-    # arc can be drawn without violating the building setback.
+    # A building on the inside of the bend must never be covered by the
+    # exported road ribbon, even when the adaptive fitter can still find a
+    # broader radius that goes around it.
     building = OsmPolygonFeature(
         "building/near_bend", {"building": "yes"},
         (GeoPolygon(tuple(_ll(x, z) for x, z in (
@@ -975,5 +977,13 @@ def test_sharp_turn_with_adjacent_building_stays_on_osm_centerline(tmp_path):
         tmp_path, [road], world_size=1000,
         building_polygons=(building,),
     )
-    assert info["smoothed_rural_bends"] == 0
-    assert (500, 350) in _way_points(nodes, ways[0])
+    path = LineString(_way_points(nodes, ways[0]))
+    footprint = path.buffer(3.0 + 3.0)
+    building_shape = Polygon(tuple((x, z) for x, z in (
+        (488, 351), (500, 351), (500, 360),
+        (488, 360), (488, 351),
+    ))).buffer(4.0)
+    if info["smoothed_rural_bends"]:
+        assert not footprint.intersects(building_shape)
+    else:
+        assert (500, 350) in _way_points(nodes, ways[0])
