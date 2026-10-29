@@ -175,18 +175,24 @@ def test_rural_bends_become_gradual_curves_when_space_is_available(tmp_path):
     assert _export(tmp_path, [road], world_size=1000)[3] == source
 
 
-def test_urban_place_protects_road_bend(tmp_path):
+def test_urban_place_allows_compact_bend_when_no_building_is_in_the_way(tmp_path):
+    from shapely.geometry import LineString
     village = OsmPointFeature(
         "node/7", {"place": "village"}, _ll(400, 200),
     )
     info, nodes, ways, _ = _export(
         tmp_path, [_open_country_road()], world_size=1000, places=(village,),
     )
-    assert info["smoothed_rural_bends"] == 0
-    assert _way_points(nodes, ways[0]) == [(200, 200), (400, 200), (400, 400)]
+    points = _way_points(nodes, ways[0])
+    assert info["smoothed_rural_bends"] == 1
+    assert points[0] == (200, 200) and points[-1] == (400, 400)
+    assert (400, 200) not in points
+    original = LineString(((200, 200), (400, 200), (400, 400)))
+    assert LineString(points).hausdorff_distance(original) <= 5.01
 
 
-def test_urban_polygon_protects_road_bend(tmp_path):
+def test_urban_polygon_permits_small_safe_bend_without_obstacles(tmp_path):
+    from shapely.geometry import LineString
     outline = [_ll(*p) for p in (
         (375, 190), (430, 190), (430, 230), (375, 230), (375, 190),
     )]
@@ -194,10 +200,15 @@ def test_urban_polygon_protects_road_bend(tmp_path):
         "area/10", {"landuse": "residential"},
         (GeoPolygon(tuple(outline)),),
     )
-    info, _, _, _ = _export(
+    info, nodes, ways, _ = _export(
         tmp_path, [_open_country_road()], world_size=1000, urban=(housing,),
     )
-    assert info["smoothed_rural_bends"] == 0
+    points = _way_points(nodes, ways[0])
+    assert info["smoothed_rural_bends"] == 1
+    assert (400, 200) not in points
+    assert LineString(points).hausdorff_distance(
+        LineString(((200, 200), (400, 200), (400, 400)))
+    ) <= 5.01
 
 
 def test_buildings_and_other_roads_prevent_unsafe_shortcuts(tmp_path):
@@ -235,6 +246,47 @@ def test_connected_junction_is_not_rounded(tmp_path):
     assert info["smoothed_rural_bends"] == 0
     assert (400, 200) in _way_points(nodes, ways[0])
     assert set(ways[0][3]).intersection(ways[1][3])
+
+
+def test_turn_before_t_junction_smooths_but_shared_node_stays_fixed(tmp_path):
+    # The old 24m corner-based guard discarded this bend even though the
+    # proposed curve ends more than a road-width away from the junction.
+    main = OsmLineFeature(
+        "way/main", {"highway": "residential"},
+        (_ll(200, 300), _ll(400, 300),
+         _ll(400, 318), _ll(400, 460)),
+    )
+    spur = OsmLineFeature(
+        "way/spur", {"highway": "residential"},
+        (_ll(400, 318), _ll(490, 318)),
+    )
+    info, nodes, ways, data = _export(
+        tmp_path, [main, spur], world_size=1000,
+    )
+    assert info["smoothed_rural_bends"] == 1
+    assert (400, 300) not in _way_points(nodes, ways[0])
+    joined = [(way[1], _way_points(nodes, way)) for way in ways]
+    assert sum((400, 318) in pts for _, pts in joined) == 2
+    assert _export(tmp_path, [spur, main], world_size=1000)[3] == data
+
+
+def test_settlement_corner_near_building_remains_unmodified(tmp_path):
+    village = OsmPointFeature(
+        "node/hamlet", {"place": "hamlet"}, _ll(400, 200),
+    )
+    building = OsmPolygonFeature(
+        "building/close", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(x, z) for x, z in (
+            (394, 202), (406, 202), (406, 218),
+            (394, 218), (394, 202),
+        ))),),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [_open_country_road()], world_size=1000,
+        places=(village,), building_polygons=(building,),
+    )
+    assert info["smoothed_rural_bends"] == 0
+    assert (400, 200) in _way_points(nodes, ways[0])
 
 
 def test_tight_or_short_bends_keep_original_geometry(tmp_path):
