@@ -633,7 +633,7 @@ def _round_rural_bends(
             continue
 
         original_path = LineString((a, b, c))
-        for fraction in (1.0, 0.84, 0.70, 0.56, 0.44, 0.34):
+        for fraction in (1.0, 0.84, 0.70, 0.56, 0.44, 0.34, 0.27, 0.21, 0.16):
             tangent = maximum_trim * fraction
             radius = tangent / tan_half
             if radius < min_radius:
