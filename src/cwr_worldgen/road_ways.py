@@ -16,6 +16,14 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import substring
 from shapely.strtree import STRtree
 
+from .playability import (
+    _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES,
+    _PAVED_RUN_REPAIR_MAXIMUM_TANGENT_METRES,
+    _PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES,
+    _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+    _paved_run_required_tangent,
+    _turn_degrees,
+)
 from .osm import (
     BboxProjection,
     OsmDataset,
@@ -149,6 +157,11 @@ _MIN_CURVE_RADIUS_METRES = 5.0
 _BEND_MAX_LEG_SHARE = 0.42
 _BEND_SAMPLE_SPACING_METRES = 1.8
 _MAX_CORRIDOR_DEVIATION_METRES = 14.0
+# The P3D fitter already identifies tight corners that cannot fit a physical
+# paved ribbon. For native ways repair only tiny digitizing kinks, never an
+# actual broad hairpin, and keep them inside the graded OSM corridor.
+_MAX_P3D_KINK_DISPLACEMENT_METRES = 4.5
+_MAX_P3D_KINK_LEG_METRES = 16.0
 # A gently wandering centerline on long *already straight* rural stretches.
 # Maximum displacements are small because the terrain grader follows OSM.
 _MIN_FLOW_LENGTH_METRES = 140.0
@@ -467,6 +480,85 @@ class _BendClearance:
         return True
 
 
+def _repair_short_p3d_kinks(
+    run: Sequence[tuple[float, float]],
+    *,
+    owner: int,
+    width: float,
+    clearance: _BendClearance,
+) -> tuple[list[tuple[float, float]], int]:
+    """Apply the P3D fitter's width/radius repair to small rural OSM zigzags.
+
+    The stock P3D fitter (_representable_road_run) removes degree-two vertices
+    when a ribbon cannot turn through them. Native ways can sometimes avoid
+    the same square zigzag, but only if dropping the vertex keeps the whole
+    centerline within 4.5m of the original terrain grade and clears obstacles.
+    Never move a junction, bridge/tunnel seam, or a genuine wide hairpin.
+    """
+    if len(run) < 3:
+        return list(run), 0
+    original = LineString(run)
+    cleaned = list(run)
+    repaired = 0
+    # One source vertex per pass, then recompute curvature/segment lengths as
+    # the P3D fitter does; a removal may make its neighbour representable.
+    for _ in range(max(1, len(run))):
+        changed = False
+        for index in range(1, len(cleaned) - 1):
+            a, b, c = cleaned[index - 1:index + 2]
+            key = _point_key(b)
+            if key in clearance.shared or key in clearance.omitted_approaches:
+                continue
+            before, after = math.dist(a, b), math.dist(b, c)
+            if (
+                min(before, after) < 0.1
+                or min(before, after) > _MAX_P3D_KINK_LEG_METRES
+            ):
+                continue
+            turn = _turn_degrees(a, b, c)
+            if not _MIN_BEND_DEGREES <= turn <= _MAX_BEND_DEGREES:
+                continue
+            # Borrow the physical width/radius feasibility test and tangent
+            # budget from stock P3D road repair. Its minimum-radius margin
+            # prevents the inside edge of the ribbon folding onto itself.
+            minimum_radius = width * 0.5 + _PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES
+            required = _paved_run_required_tangent(turn, minimum_radius)
+            available = min(
+                _PAVED_RUN_REPAIR_MAXIMUM_TANGENT_METRES,
+                before * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+                after * _PAVED_RUN_REPAIR_TANGENT_FRACTION,
+            )
+            if required <= available + 1.0e-6:
+                continue
+            shortcut = LineString((a, c))
+            # The old terrain solver grades the OSM road, not this shortcut.
+            # Only very small OSM digitization zigzags may be simplified.
+            if (
+                shortcut.length < 0.1
+                or shortcut.distance(Point(*b))
+                > min(_MAX_P3D_KINK_DISPLACEMENT_METRES, max(2.0, width * 0.65))
+                or shortcut.distance(Point(*b))
+                > _MAX_CORRIDOR_DEVIATION_METRES
+            ):
+                continue
+            candidate = cleaned[:index] + cleaned[index + 1:]
+            candidate_path = LineString(candidate)
+            if (
+                not candidate_path.is_simple
+                or candidate_path.hausdorff_distance(original)
+                > _MAX_P3D_KINK_DISPLACEMENT_METRES
+                or not clearance.allows(owner, b, (a, c), width)
+            ):
+                continue
+            cleaned = candidate
+            repaired += 1
+            changed = True
+            break
+        if not changed:
+            break
+    return cleaned, repaired
+
+
 def _round_rural_bends(
     run: Sequence[tuple[float, float]],
     *,
@@ -540,9 +632,13 @@ def _round_rural_bends(
                 exit[0] - outgoing[0] * control,
                 exit[1] - outgoing[1] * control,
             )
+            # The P3D road fitter limits successive sampled heading changes
+            # to 15 degrees to avoid angular joints between straight pieces.
             samples = max(
-                6, math.ceil(math.radians(angle) * radius
-                             / _BEND_SAMPLE_SPACING_METRES),
+                6,
+                math.ceil(angle / _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES),
+                math.ceil(math.radians(angle) * radius
+                          / _BEND_SAMPLE_SPACING_METRES),
             )
             arc: list[tuple[float, float]] = []
             for j in range(samples + 1):
@@ -904,11 +1000,16 @@ def write_osm_road_ways(
     source_runs = _merge_compatible_runs(source_runs, non_ground_points)
     clearance = _BendClearance(dataset, projection, source_runs)
     smoothed_bends = 0
+    repaired_rural_kinks = 0
     softened_rural_straights = 0
     for owner, tags, width, original in source_runs:
-        run, rounded = _round_rural_bends(
+        repaired_run, repaired = _repair_short_p3d_kinks(
             original, owner=owner, width=width, clearance=clearance,
         )
+        run, rounded = _round_rural_bends(
+            repaired_run, owner=owner, width=width, clearance=clearance,
+        )
+        repaired_rural_kinks += repaired
         run, softened = _flow_rural_straights(
             run, owner=owner, tags=tags, width=width, clearance=clearance,
         )
@@ -963,6 +1064,7 @@ def write_osm_road_ways(
         "unmatched_bridge_features": unmatched_bridge_features,
         "stock_bridge_modules": len(stock_bridge_axes),
         "smoothed_rural_bends": smoothed_bends,
+        "repaired_rural_kinks": repaired_rural_kinks,
         "softened_rural_straights": softened_rural_straights,
         "merged_source_runs": original_run_count - len(source_runs),
         "merged_road_chains": len(source_runs),
