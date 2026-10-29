@@ -183,6 +183,13 @@ _FLOW_AMPLITUDES_METRES = {
     "track": 3.8,
 }
 _JUNCTION_CLEARANCE_METRES = 24.0
+# Only the exact connected node must remain immovable. Leave enough straight
+# road near it for stable T/X geometry, instead of rejecting every corner
+# within a 24 m radius even when the actual curve is safely outside it.
+_JUNCTION_BEND_NECK_METRES = 8.0
+# Tight settlement-aware turn rounding is allowed in unobstructed space.
+# Large rural shortcuts remain forbidden by the original terrain corridor.
+_SETTLEMENT_BEND_MAX_DEVIATION_METRES = 5.0
 _ROAD_SHOULDER_CLEARANCE_METRES = 3.0
 _BUILDING_CLEARANCE_METRES = 4.0
 _URBAN_CLEARANCE_METRES = 30.0
@@ -447,21 +454,39 @@ class _BendClearance:
         corner: tuple[float, float],
         curve: Sequence[tuple[float, float]],
         width: float,
+        *,
+        original_path: LineString | None = None,
     ) -> bool:
         if _point_key(corner) in self.shared:
             return False
         curve_line = LineString(curve)
+        if not curve_line.is_simple:
+            return False
         footprint = curve_line.buffer(width * 0.5 + _ROAD_SHOULDER_CLEARANCE_METRES)
         minx, minz, maxx, maxz = footprint.bounds
         if minx < 0 or minz < 0 or maxx >= self.limit or maxz >= self.limit:
             return False
 
         if self.junctions is not None:
-            vicinity = Point(*corner).buffer(_JUNCTION_CLEARANCE_METRES)
-            if self._intersects(self.junctions, self.junction_points, vicinity):
+            # The P3D fitter leaves the branch node untouched. For native
+            # ways, guard the *proposed arc*, not the entire neighborhood of
+            # the old corner: a bend 15m before a T-junction is fine if it
+            # ends with a suitable straight neck.
+            guard = max(_JUNCTION_BEND_NECK_METRES, width + 2.0)
+            if self._intersects(
+                self.junctions, self.junction_points,
+                curve_line.buffer(guard),
+            ):
                 return False
         if self._intersects(self.settlements, self.settlement_shapes, footprint):
-            return False
+            # Place markers and broad urban polygons are poor proxies for
+            # where there is room to curve. Keep true buildings and intersecting
+            # roads as hard obstacles, but permit *small* road changes inside
+            # settlements, within the existing terrain-grading footprint.
+            if original_path is None or curve_line.hausdorff_distance(
+                original_path
+            ) > _SETTLEMENT_BEND_MAX_DEVIATION_METRES:
+                return False
         if self._intersects(self.obstacles, self.obstacle_shapes, footprint):
             return False
         if self.roads is not None:
@@ -666,7 +691,9 @@ def _round_rural_bends(
                     > _MAX_CORRIDOR_DEVIATION_METRES
                     for p in arc
                 )
-                or not clearance.allows(owner, b, arc, width)
+                or not clearance.allows(
+                    owner, b, arc, width, original_path=LineString((entry, b, exit)),
+                )
             ):
                 continue
             rounded[i] = arc
