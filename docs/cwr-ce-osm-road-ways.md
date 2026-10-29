@@ -57,13 +57,21 @@ new connectivity. Junctions, bridge/tunnel approaches, width/material transition
 remain protected. The engine's existing 512-node output chunking still applies
 to long merged chains.
 
-Rural bends now use sampled **cubic circular-arc approximations** with
-tangent-continuity at both ends rather than the old quadratic interpolation.
-The curvature is adaptive: open, long approaches receive larger radii; turns
-with insufficient length for a 12 m minimum radius are left untouched. The
-maximum tangent trim is 38 m and no more than 38% of each approach. Proposed
-curves stay within 14 m of the original OSM road centerline to respect the
-existing terrain-grading corridor.
+Rural bends use sampled **cubic circular-arc approximations** with
+tangent-continuity at both ends. Sharp turns between **18° and 160°** are now
+eligible when both approach legs are at least **16 m**. The fitter tries the
+widest natural radius first, then progressively smaller radii if the proposed
+curve would leave the terrain-grading corridor or conflict with nearby
+features. The minimum radius is **at least 5 m** and scales with exported
+road width. Extremely tight hairpins or short legs that cannot accommodate
+that radius remain unchanged rather than producing unrealistic kinks.
+
+The maximum tangent trim is now **52 m**, or at most **42%** of either approach.
+The cubic arc is sampled at approximately **1.8 m** intervals and never
+strays more than **14 m** from the original OSM source centerline. Adjacent
+curves are rejected together if their combined path would self-intersect.
+This also handles previously unrounded turns above 135° without adding
+roadway over unsafe shortcuts.
 
 The same cautious clearance checks remain: no smoothing at shared junctions,
 inside or near towns and residential areas, or when the changed road ribbon
