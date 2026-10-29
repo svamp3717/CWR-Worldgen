@@ -260,14 +260,19 @@ def test_turn_before_t_junction_smooths_but_shared_node_stays_fixed(tmp_path):
         "way/spur", {"highway": "residential"},
         (_ll(400, 318), _ll(490, 318)),
     )
+    village = OsmPointFeature(
+        "node/near_intersection", {"place": "village"}, _ll(400, 300),
+    )
     info, nodes, ways, data = _export(
-        tmp_path, [main, spur], world_size=1000,
+        tmp_path, [main, spur], world_size=1000, places=(village,),
     )
     assert info["smoothed_rural_bends"] == 1
     assert (400, 300) not in _way_points(nodes, ways[0])
     joined = [(way[1], _way_points(nodes, way)) for way in ways]
     assert sum((400, 318) in pts for _, pts in joined) == 2
-    assert _export(tmp_path, [spur, main], world_size=1000)[3] == data
+    assert _export(
+        tmp_path, [spur, main], world_size=1000, places=(village,),
+    )[3] == data
 
 
 def test_settlement_corner_near_building_remains_unmodified(tmp_path):
