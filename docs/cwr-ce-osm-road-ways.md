@@ -98,12 +98,23 @@ OSM width, just like the exported native ways.
 The build manifest reports `road_ways.repaired_rural_kinks` separately from
 `road_ways.smoothed_rural_bends`.
 
-The same cautious clearance checks remain: no smoothing at shared junctions,
-inside or near towns and residential areas, or when the changed road ribbon
-would touch buildings, other roads, bridge or tunnel approaches, water/watercourses,
-or the terrain boundary. Endpoints are always preserved. Although curves
-appear more natural, the generator still fits/grades terrain against the
-original OSM source, so verify steep mountain roads in-game.
+Corner rounding also works **near villages, residential landuse, and
+T/X intersections**, where it previously left the road angular. It never moves
+a shared junction or bridge/tunnel endpoint. Instead of forbidding every bend
+within a broad 24 m radius of a junction, the exporter checks the *actual
+candidate curve* and preserves a straight neck of at least **8 m** (or the
+road width plus 2 m) before the connected junction.
+
+A settlement marker or residential polygon alone no longer blocks a turn.
+Inside settlements, the new arc must remain within **5 m of the original
+road**, compared with the normal rural 14 m limit. The **building and roadway
+clearance checks remain strict**, so narrow streets with nearby buildings,
+water, neighboring roads, or no safe tangent space stay unchanged. Artificial
+long S-curves and removal of tiny P3D digitization kinks remain conservative
+around settlements. Endpoints always remain fixed.
+
+Worldgen still grades terrain against the original OSM road centerline;
+inspect steep slopes and built-up intersections in-game after regeneration.
 
 ### Gentle curves on long straight sections
 
