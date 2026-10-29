@@ -141,11 +141,13 @@ def _runs(
 
 # Conservative limits keep the new curve close to the graded OSM road
 # corridor, rather than letting a cosmetic improvement cut across a field.
-_MIN_LEG_METRES = 18.0
-_MIN_BEND_DEGREES = 25.0
-_MAX_BEND_DEGREES = 135.0
-_MAX_TANGENT_METRES = 38.0
-_MIN_CURVE_RADIUS_METRES = 12.0
+_MIN_LEG_METRES = 16.0
+_MIN_BEND_DEGREES = 18.0
+_MAX_BEND_DEGREES = 160.0
+_MAX_TANGENT_METRES = 52.0
+_MIN_CURVE_RADIUS_METRES = 5.0
+_BEND_MAX_LEG_SHARE = 0.42
+_BEND_SAMPLE_SPACING_METRES = 1.8
 _MAX_CORRIDOR_DEVIATION_METRES = 14.0
 # A gently wandering centerline on long *already straight* rural stretches.
 # Maximum displacements are small because the terrain grader follows OSM.
@@ -472,11 +474,11 @@ def _round_rural_bends(
     width: float,
     clearance: _BendClearance,
 ) -> tuple[list[tuple[float, float]], int]:
-    """Replace eligible sharp corners with approximately circular cubic arcs.
+    """Fit the broadest safe circular-style cubic arc to sharp rural corners.
 
-    Endpoints, shared junctions, urban bends, and constrained geometry stay
-    exactly on their original OSM positions. Adjacent arcs cannot overlap
-    because the trim is at most 38% of either source segment.
+    Short approaches, very tight hairpins, road junctions and urban areas
+    retain their OSM positions. Adjacent arcs cannot consume a whole shared
+    segment: each trims at most 42% of its original length.
     """
     if len(run) < 3:
         return list(run), 0
@@ -495,56 +497,84 @@ def _round_rural_bends(
         if not _MIN_BEND_DEGREES <= angle <= _MAX_BEND_DEGREES:
             continue
 
-        # A circular-arc approximation with cubic Bezier controls avoids
-        # the triangular-looking center of the older quadratic corner. The
-        # radius grows on long open roads and shrinks on slower/short roads.
+        # Try the broadest radius first. Very sharp turns and imperfect
+        # short-leg OSM geometry previously remained square because a single
+        # proposed 12m+ radius could not fit the original grade corridor.
+        # Back off in measured steps, while keeping a driveable minimum radius
+        # proportional to the emitted road width.
         half_angle = math.radians(angle) * 0.5
-        tangent_of_half = math.tan(half_angle)
-        # Give long open roads a wider flowing sweep; short approaches keep
-        # a tight trim or their original bend when no safe radius fits.
-        desired = max(
-            12.0,
-            8.0 + min(before, after) * 0.12
-            + _MIN_CURVE_RADIUS_METRES * tangent_of_half,
+        tan_half = math.tan(half_angle)
+        min_radius = max(_MIN_CURVE_RADIUS_METRES, width * 0.65 + 1.0)
+        desired_radius = max(min_radius, 10.0 + min(before, after) * 0.22)
+        maximum_trim = min(
+            _MAX_TANGENT_METRES,
+            before * _BEND_MAX_LEG_SHARE,
+            after * _BEND_MAX_LEG_SHARE,
+            desired_radius * tan_half,
         )
-        tangent = min(_MAX_TANGENT_METRES, desired, before * 0.38, after * 0.38)
-        radius = tangent / tangent_of_half
-        if radius < _MIN_CURVE_RADIUS_METRES:
+        if maximum_trim < min_radius * tan_half:
             continue
-        entry = (b[0] - incoming[0] * tangent, b[1] - incoming[1] * tangent)
-        exit = (b[0] + outgoing[0] * tangent, b[1] + outgoing[1] * tangent)
-        # For a circular arc of angle phi, cubic control offset is
-        # (4/3)*tan(phi/4)*R. It matches each straight segment's tangent.
-        control = (4.0 / 3.0) * math.tan(half_angle * 0.5) * radius
-        p1 = (entry[0] + incoming[0] * control,
-              entry[1] + incoming[1] * control)
-        p2 = (exit[0] - outgoing[0] * control,
-              exit[1] - outgoing[1] * control)
-        samples = max(6, math.ceil(2.0 * tangent / 3.0))
-        arc: list[tuple[float, float]] = []
-        for j in range(samples + 1):
-            t = j / samples
-            omt = 1.0 - t
-            x = (omt**3 * entry[0] + 3*omt**2*t * p1[0]
-                 + 3*omt*t*t * p2[0] + t**3 * exit[0])
-            z = (omt**3 * entry[1] + 3*omt**2*t * p1[1]
-                 + 3*omt*t*t * p2[1] + t**3 * exit[1])
-            point = (round(x, _COORD_DECIMALS), round(z, _COORD_DECIMALS))
-            if not arc or point != arc[-1]:
-                arc.append(point)
-        # Do not stray too far from the original terrain-graded road
-        # corridor: the .ways profile still uses the original grade solver.
+
         original_path = LineString((a, b, c))
-        if (
-            len(arc) <= 2
-            or any(
-                original_path.distance(Point(*p)) > _MAX_CORRIDOR_DEVIATION_METRES
-                for p in arc
+        for fraction in (1.0, 0.84, 0.70, 0.56, 0.44, 0.34):
+            tangent = maximum_trim * fraction
+            radius = tangent / tan_half
+            if radius < min_radius:
+                break
+
+            entry = (
+                b[0] - incoming[0] * tangent,
+                b[1] - incoming[1] * tangent,
             )
-            or not clearance.allows(owner, b, arc, width)
-        ):
-            continue
-        rounded[i] = arc
+            exit = (
+                b[0] + outgoing[0] * tangent,
+                b[1] + outgoing[1] * tangent,
+            )
+            # A cubic circular arc matches both straight-line tangents.
+            control = (4.0 / 3.0) * math.tan(half_angle * 0.5) * radius
+            p1 = (
+                entry[0] + incoming[0] * control,
+                entry[1] + incoming[1] * control,
+            )
+            p2 = (
+                exit[0] - outgoing[0] * control,
+                exit[1] - outgoing[1] * control,
+            )
+            samples = max(
+                6, math.ceil(math.radians(angle) * radius
+                             / _BEND_SAMPLE_SPACING_METRES),
+            )
+            arc: list[tuple[float, float]] = []
+            for j in range(samples + 1):
+                t = j / samples
+                omt = 1.0 - t
+                x = (omt**3 * entry[0] + 3*omt**2*t * p1[0]
+                     + 3*omt*t*t * p2[0] + t**3 * exit[0])
+                z = (omt**3 * entry[1] + 3*omt**2*t * p1[1]
+                     + 3*omt*t*t * p2[1] + t**3 * exit[1])
+                point = (
+                    round(x, _COORD_DECIMALS),
+                    round(z, _COORD_DECIMALS),
+                )
+                if not arc or point != arc[-1]:
+                    arc.append(point)
+            if len(arc) <= 2:
+                continue
+            curve = LineString(arc)
+            # Terrain is graded against original OSM; do not carve large
+            # shortcuts or route across buildings, water and other roads.
+            if (
+                not curve.is_simple
+                or any(
+                    original_path.distance(Point(*p))
+                    > _MAX_CORRIDOR_DEVIATION_METRES
+                    for p in arc
+                )
+                or not clearance.allows(owner, b, arc, width)
+            ):
+                continue
+            rounded[i] = arc
+            break
 
     if not rounded:
         return list(run), 0
@@ -558,6 +588,10 @@ def _round_rural_bends(
             result.append(run[i])
     if run[-1] != result[-1]:
         result.append(run[-1])
+    # Two individually valid nearby bends must not combine into a loop or
+    # crossover when the OSM source contains a tight S-curve or hairpin.
+    if not LineString(result).is_simple:
+        return list(run), 0
     return result, len(rounded)
 
 
