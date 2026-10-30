@@ -1249,3 +1249,141 @@ def test_residual_smoothing_is_blocked_by_nearby_building(tmp_path):
     )
     assert info["eased_residual_turns"] == 0
     assert LineString(_way_points(nodes, ways[0])).is_simple
+
+
+
+def _junction_tangent_angle(left, right, joint):
+    """Measure through-road heading change at the exact shared node."""
+    import math
+    # Approach and continuation may be separate OSM ways, either direction.
+    def outward(points):
+        if points[0] == joint:
+            p = points[1]
+        else:
+            assert points[-1] == joint
+            p = points[-2]
+        distance = math.dist(joint, p)
+        return ((p[0] - joint[0]) / distance,
+                (p[1] - joint[1]) / distance)
+    a, b = outward(left), outward(right)
+    cosine = max(-1, min(1, -(a[0]*b[0] + a[1]*b[1])))
+    return math.degrees(math.acos(cosine))
+
+
+def test_split_paved_through_road_smooths_at_fixed_t_junction(tmp_path):
+    import math
+    from shapely.geometry import LineString
+    center = (400, 350)
+    before = OsmLineFeature(
+        "way/through1", {"highway": "residential", "width": "6"},
+        (_ll(180, 350), _ll(*center)),
+    )
+    after = OsmLineFeature(
+        "way/through2", {"highway": "residential", "width": "6"},
+        (_ll(*center), _ll(590, 460)),
+    )
+    side = OsmLineFeature(
+        "way/side", {"highway": "track", "surface": "gravel"},
+        (_ll(*center), _ll(400, 480)),
+    )
+    info, nodes, ways, first = _export(
+        tmp_path, [before, after, side], world_size=1000,
+    )
+    assert info["smoothed_junction_through_roads"] == 1
+    paved = [_way_points(nodes, way) for way in ways if way[2] == TEXTURES["paved"]]
+    assert len(paved) == 2
+    assert _junction_tangent_angle(paved[0], paved[1], center) < 3.0
+    assert all(LineString(points).is_simple for points in paved)
+    assert {paved[0][0], paved[0][-1], paved[1][0], paved[1][-1]} == {
+        (180, 350), center, (590, 460),
+    }
+    assert sum(center in _way_points(nodes, way) for way in ways) == 3
+    assert _export(
+        tmp_path, [side, after, before], world_size=1000,
+    )[3] == first
+
+
+def test_single_osm_through_way_fairs_across_interior_t_node(tmp_path):
+    center = (400, 350)
+    through = OsmLineFeature(
+        "way/main", {"highway": "residential"},
+        (_ll(180, 350), _ll(*center), _ll(590, 460)),
+    )
+    spur = OsmLineFeature(
+        "way/side", {"highway": "track", "surface": "gravel"},
+        (_ll(*center), _ll(400, 500)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [through, spur], world_size=1000,
+    )
+    assert info["smoothed_junction_through_roads"] == 1
+    main_points = next(
+        _way_points(nodes, way) for way in ways if way[2] == TEXTURES["paved"]
+    )
+    i = main_points.index(center)
+    assert i > 0 and i + 1 < len(main_points)
+    import math
+    a, b = main_points[i-1], main_points[i+1]
+    inbound = ((center[0]-a[0]), (center[1]-a[1]))
+    outbound = ((b[0]-center[0]), (b[1]-center[1]))
+    turn = math.degrees(math.acos(max(-1, min(1,
+        (inbound[0]*outbound[0]+inbound[1]*outbound[1])
+        / math.hypot(*inbound) / math.hypot(*outbound)
+    ))))
+    assert turn < 3.0
+    assert sum(center in _way_points(nodes, way) for way in ways) == 2
+
+
+def test_t_junction_fairing_does_not_move_other_road_or_building(tmp_path):
+    from shapely.geometry import LineString
+    center = (400, 350)
+    before = OsmLineFeature(
+        "way/through1", {"highway": "residential"},
+        (_ll(180, 350), _ll(*center)),
+    )
+    after = OsmLineFeature(
+        "way/through2", {"highway": "residential"},
+        (_ll(*center), _ll(590, 460)),
+    )
+    spur = OsmLineFeature(
+        "way/side", {"highway": "track", "surface": "gravel"},
+        (_ll(*center), _ll(400, 480)),
+    )
+    building = OsmPolygonFeature(
+        "building/corner", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(x, z) for x, z in (
+            (394, 346), (403, 346), (403, 358),
+            (394, 358), (394, 346),
+        ))),),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [before, after, spur], world_size=1000,
+        building_polygons=(building,),
+    )
+    assert info["smoothed_junction_through_roads"] == 0
+    assert sum(center in _way_points(nodes, way) for way in ways) == 3
+    side_points = next(
+        _way_points(nodes, way) for way in ways if way[2] == TEXTURES["gravel"]
+    )
+    assert side_points == [center, (400, 480)]
+
+
+def test_junction_fairing_does_not_change_bridge_transition(tmp_path):
+    center = (400, 350)
+    before = OsmLineFeature(
+        "way/bank", {"highway": "residential"},
+        (_ll(180, 350), _ll(*center)),
+    )
+    after = OsmLineFeature(
+        "way/after", {"highway": "residential"},
+        (_ll(*center), _ll(590, 460)),
+    )
+    bridge = OsmLineFeature(
+        "way/bridge", {"highway": "tertiary", "bridge": "yes"},
+        (_ll(*center), _ll(400, 490)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [before, after, bridge], world_size=1000,
+    )
+    assert info["smoothed_junction_through_roads"] == 0
+    assert sum(center in _way_points(nodes, way) for way in ways) == 2
