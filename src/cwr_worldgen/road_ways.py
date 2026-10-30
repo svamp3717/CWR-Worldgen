@@ -656,13 +656,10 @@ def _round_rural_bends(
         if maximum_trim < min_radius * tan_half:
             continue
 
-        original_path = LineString((a, b, c))
-        for fraction in (1.0, 0.84, 0.70, 0.56, 0.44, 0.34, 0.27, 0.21, 0.16):
-            tangent = maximum_trim * fraction
+        def fitting_arc(tangent: float) -> list[tuple[float, float]] | None:
             radius = tangent / tan_half
             if radius < min_radius:
-                break
-
+                return None
             entry = (
                 b[0] - incoming[0] * tangent,
                 b[1] - incoming[1] * tangent,
@@ -671,7 +668,6 @@ def _round_rural_bends(
                 b[0] + outgoing[0] * tangent,
                 b[1] + outgoing[1] * tangent,
             )
-            # A cubic circular arc matches both straight-line tangents.
             control = (4.0 / 3.0) * math.tan(half_angle * 0.5) * radius
             p1 = (
                 entry[0] + incoming[0] * control,
@@ -681,8 +677,6 @@ def _round_rural_bends(
                 exit[0] - outgoing[0] * control,
                 exit[1] - outgoing[1] * control,
             )
-            # The P3D road fitter limits successive sampled heading changes
-            # to 15 degrees to avoid angular joints between straight pieces.
             samples = max(
                 6,
                 math.ceil(angle / _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES),
@@ -697,29 +691,55 @@ def _round_rural_bends(
                      + 3*omt*t*t * p2[0] + t**3 * exit[0])
                 z = (omt**3 * entry[1] + 3*omt**2*t * p1[1]
                      + 3*omt*t*t * p2[1] + t**3 * exit[1])
-                point = (
-                    round(x, _COORD_DECIMALS),
-                    round(z, _COORD_DECIMALS),
-                )
+                point = (round(x, _COORD_DECIMALS),
+                         round(z, _COORD_DECIMALS))
                 if not arc or point != arc[-1]:
                     arc.append(point)
             if len(arc) <= 2:
-                continue
+                return None
             curve = LineString(arc)
             local_source = LineString((entry, b, exit))
-            # Terrain is graded against original OSM; do not carve large
-            # shortcuts or route across buildings, water and other roads.
             if (
                 not curve.is_simple
                 or curve.hausdorff_distance(local_source)
                     > _MAX_CORRIDOR_DEVIATION_METRES
                 or not clearance.allows(
-                    owner, b, arc, width, original_path=LineString((entry, b, exit)),
+                    owner, b, arc, width, original_path=local_source,
                 )
             ):
+                return None
+            return arc
+
+        # Use the P3D-style backoff for finding a safe starting radius,
+        # then refine the gap to the previous failed radius. Discrete steps
+        # alone made some open 200m bends *tighter* than 80m bends because
+        # both hit the same arbitrary percentage cutoff.
+        previous_failed = maximum_trim
+        best_arc = None
+        for fraction in (1.0, 0.84, 0.70, 0.56, 0.44, 0.34, 0.27, 0.21, 0.16):
+            tangent = maximum_trim * fraction
+            if tangent < min_radius * tan_half:
+                break
+            arc = fitting_arc(tangent)
+            if arc is None:
+                previous_failed = tangent
                 continue
-            rounded[i] = arc
+            best_arc = arc
+            if previous_failed > tangent + 0.01:
+                low, high = tangent, previous_failed
+                # Binary-search for the broadest safe circle within 0.25m
+                # without ever accepting an unsafe/too-wide ribbon.
+                for _ in range(8):
+                    middle = (low + high) * 0.5
+                    alternative = fitting_arc(middle)
+                    if alternative is None:
+                        high = middle
+                    else:
+                        low = middle
+                        best_arc = alternative
             break
+        if best_arc is not None:
+            rounded[i] = best_arc
 
     if not rounded:
         return list(run), 0
