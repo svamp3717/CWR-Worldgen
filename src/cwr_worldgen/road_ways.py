@@ -198,7 +198,7 @@ _JUNCTION_FAIR_MIN_LEG_METRES = 18.0
 _JUNCTION_FAIR_MIN_TURN_DEGREES = 16.0
 _JUNCTION_FAIR_MAX_TURN_DEGREES = 95.0
 _JUNCTION_FAIR_JOIN_GUARD_METRES = 16.0
-_JUNCTION_FAIR_SAMPLE_METRES = 2.0
+_JUNCTION_FAIR_SAMPLE_METRES = 1.25
 # Tight settlement-aware turn rounding is allowed in unobstructed space.
 # Large rural shortcuts remain forbidden by the original terrain corridor.
 _SETTLEMENT_BEND_MAX_DEVIATION_METRES = 5.0
@@ -1131,7 +1131,7 @@ def _stock_bridge_axes(bridge_objects: Sequence[object]) -> list[LineString]:
 
 def _fair_through_junctions(
     runs: Sequence[_RoadRun], clearance: _BendClearance,
-) -> tuple[list[_RoadRun], int]:
+) -> tuple[list[_RoadRun], int, set[int]]:
     """Keep shared road graph nodes fixed, but match through-road tangents.
 
     A sharp turn *at* a T-junction is never reached by per-corner rounding:
@@ -1152,6 +1152,7 @@ def _fair_through_junctions(
             if key in clearance.shared:
                 runs_by_junction[key].add(index)
     smoothed = 0
+    touched: set[int] = set()
 
     def arms_at(key):
         arms = []
@@ -1324,8 +1325,9 @@ def _fair_through_junctions(
         for index, pts in trial.items():
             owner, tags, width, _ = working[index]
             working[index] = (owner, tags, width, pts)
+        touched.update(trial)
         smoothed += 1
-    return working, smoothed
+    return working, smoothed, touched
 
 
 def write_osm_road_ways(
@@ -1446,7 +1448,7 @@ def write_osm_road_ways(
     source_runs = _merge_compatible_runs(source_runs, non_ground_points)
     clearance = _BendClearance(dataset, projection, source_runs)
     original_source_runs = source_runs
-    source_runs, smoothed_junctions = _fair_through_junctions(
+    source_runs, smoothed_junctions, junction_faired_runs = _fair_through_junctions(
         source_runs, clearance,
     )
     smoothed_bends = 0
@@ -1462,9 +1464,15 @@ def write_osm_road_ways(
             repaired_run, owner=owner, width=width, clearance=clearance,
         )
         repaired_rural_kinks += repaired
-        run, softened = _flow_rural_straights(
-            run, owner=owner, tags=tags, width=width, clearance=clearance,
-        )
+        # Long cosmetic S-curves must not overwrite the freshly aligned
+        # approach tangents at a shared junction. Other road runs still get
+        # the ordinary rural-flow treatment.
+        if run_index in junction_faired_runs:
+            softened = 0
+        else:
+            run, softened = _flow_rural_straights(
+                run, owner=owner, tags=tags, width=width, clearance=clearance,
+            )
         run, eased = _ease_remaining_turns(
             run, owner=owner, width=width, clearance=clearance,
             original_reference=original_source_runs[run_index][3],
