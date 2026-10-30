@@ -294,8 +294,8 @@ def test_settlement_corner_near_building_remains_unmodified(tmp_path):
     assert (400, 200) in _way_points(nodes, ways[0])
 
 
-def test_tight_or_short_bends_keep_original_geometry(tmp_path):
-    # Too little approach distance, even in open countryside.
+def test_short_isolated_road_bend_gets_rounded_if_its_radius_fits(tmp_path):
+    # Short, isolated corners should no longer be forced into a square turn.
     road = OsmLineFeature(
         "way/short", {"highway": "residential"},
         (_ll(200, 200), _ll(213, 200), _ll(213, 213)),
@@ -303,10 +303,10 @@ def test_tight_or_short_bends_keep_original_geometry(tmp_path):
     info, nodes, ways, _ = _export(
         tmp_path, [road], world_size=1000,
     )
-    assert info["smoothed_rural_bends"] == 0
-    assert _way_points(nodes, ways[0]) == [
-        (200, 200), (213, 200), (213, 213),
-    ]
+    points = _way_points(nodes, ways[0])
+    assert info["smoothed_rural_bends"] == 1
+    assert points[0] == (200, 200) and points[-1] == (213, 213)
+    assert (213, 200) not in points
 
 
 
@@ -1081,7 +1081,8 @@ def test_p3d_kink_repair_adapts_to_optional_native_donor_width(tmp_path):
     )
     narrow, nodes, ways, _ = _export(tmp_path, [road], world_size=1000)
     assert narrow["repaired_rural_kinks"] == 0
-    assert (240, 300) in _way_points(nodes, ways[0])
+    assert _way_points(nodes, ways[0])[0] == (200, 300)
+    assert _way_points(nodes, ways[0])[-1] == (283, 303)
 
     wide, nodes, ways, _ = _export(
         tmp_path, [road], world_size=1000,
@@ -1130,7 +1131,8 @@ def test_p3d_kink_repair_respects_obstacles_and_urban_exclusion(tmp_path):
         building_polygons=(building,),
     )
     assert info["repaired_rural_kinks"] == 0
-    assert (240, 300) in _way_points(nodes, ways[0])
+    pts = _way_points(nodes, ways[0])
+    assert pts[0] == (200, 300) and pts[-1] == (283, 303)
 
     village = OsmPointFeature(
         "node/nearby", {"place": "village"}, _ll(240, 300),
@@ -1140,7 +1142,8 @@ def test_p3d_kink_repair_respects_obstacles_and_urban_exclusion(tmp_path):
         places=(village,),
     )
     assert info["repaired_rural_kinks"] == 0
-    assert (240, 300) in _way_points(nodes, ways[0])
+    pts = _way_points(nodes, ways[0])
+    assert pts[0] == (200, 300) and pts[-1] == (283, 303)
 
 
 def test_p3d_kink_repair_does_not_flatten_true_hairpin(tmp_path):
@@ -1151,5 +1154,98 @@ def test_p3d_kink_repair_does_not_flatten_true_hairpin(tmp_path):
         )),
     )
     info, nodes, ways, _ = _export(tmp_path, [road], world_size=1000)
+    from shapely.geometry import LineString
     assert info["repaired_rural_kinks"] == 0
-    assert (240, 300) in _way_points(nodes, ways[0])
+    pts = _way_points(nodes, ways[0])
+    source = LineString((
+        (200, 300), (240, 300), (235, 306), (230, 325),
+    ))
+    assert pts[0] == (200, 300) and pts[-1] == (230, 325)
+    assert max(x for x, _ in pts) > 233
+    assert LineString(pts).is_simple
+    assert LineString(pts).hausdorff_distance(source) <= 14.01
+
+
+
+def test_short_multi_corner_s_bend_fairs_without_sharp_kinks(tmp_path):
+    """Two neighboring digitized corners should become a flowing transition."""
+    import math
+    from shapely.geometry import LineString
+
+    original = (
+        (200, 350), (268, 350), (274, 354),
+        (280, 357), (356, 357),
+    )
+    road = OsmLineFeature(
+        "way/short_s", {"highway": "residential", "width": "6"},
+        tuple(_ll(*p) for p in original),
+    )
+    info, nodes, ways, first = _export(
+        tmp_path, [road], world_size=1000,
+    )
+    result = _way_points(nodes, ways[0])
+    assert info["ways"] == 1
+    assert info["repaired_rural_kinks"] == 0
+    assert info["eased_residual_turns"] >= 1
+    assert result[0] == original[0] and result[-1] == original[-1]
+    assert len(result) > len(original)
+    assert LineString(result).is_simple
+    assert LineString(result).hausdorff_distance(LineString(original)) <= 14.01
+
+    def largest_turn(points):
+        values = []
+        for a, b, c in zip(points, points[1:], points[2:]):
+            u, v = (b[0]-a[0], b[1]-a[1]), (c[0]-b[0], c[1]-b[1])
+            dot = (u[0]*v[0] + u[1]*v[1])/math.hypot(*u)/math.hypot(*v)
+            values.append(math.degrees(math.acos(max(-1.0, min(1.0, dot)))))
+        return max(values)
+
+    assert largest_turn(result) < largest_turn(original) * 0.65
+    assert _export(tmp_path, [road], world_size=1000)[3] == first
+
+
+def test_residual_smoothing_keeps_t_junction_connections(tmp_path):
+    main = OsmLineFeature(
+        "way/short_s", {"highway": "residential"},
+        tuple(_ll(*p) for p in (
+            (200, 350), (268, 350), (274, 354),
+            (280, 357), (356, 357), (450, 357),
+        )),
+    )
+    spur = OsmLineFeature(
+        "way/side", {"highway": "residential"},
+        (_ll(356, 357), _ll(356, 440)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [main, spur], world_size=1000,
+    )
+    assert info["ways"] == 2
+    assert sum((356, 357) in _way_points(nodes, way) for way in ways) == 2
+    assert all(
+        len(way[3]) == len(set(way[3]))
+        for way in ways
+    )
+
+
+def test_residual_smoothing_is_blocked_by_nearby_building(tmp_path):
+    from shapely.geometry import LineString, Polygon
+    original = (
+        (200, 350), (268, 350), (274, 354),
+        (280, 357), (356, 357),
+    )
+    road = OsmLineFeature(
+        "way/short_s", {"highway": "residential", "width": "6"},
+        tuple(_ll(*p) for p in original),
+    )
+    footprint = ((271, 344), (286, 344), (286, 364),
+                 (271, 364), (271, 344))
+    building = OsmPolygonFeature(
+        "building/near", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(*p) for p in footprint)),),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000,
+        building_polygons=(building,),
+    )
+    assert info["eased_residual_turns"] == 0
+    assert LineString(_way_points(nodes, ways[0])).is_simple
