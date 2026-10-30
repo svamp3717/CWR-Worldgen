@@ -706,15 +706,13 @@ def _round_rural_bends(
             if len(arc) <= 2:
                 continue
             curve = LineString(arc)
+            local_source = LineString((entry, b, exit))
             # Terrain is graded against original OSM; do not carve large
             # shortcuts or route across buildings, water and other roads.
             if (
                 not curve.is_simple
-                or any(
-                    original_path.distance(Point(*p))
+                or curve.hausdorff_distance(local_source)
                     > _MAX_CORRIDOR_DEVIATION_METRES
-                    for p in arc
-                )
                 or not clearance.allows(
                     owner, b, arc, width, original_path=LineString((entry, b, exit)),
                 )
@@ -749,6 +747,7 @@ def _ease_remaining_turns(
     owner: int,
     width: float,
     clearance: _BendClearance,
+    original_reference: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[list[tuple[float, float]], int]:
     """Fair residual short OSM zigzags that single-corner arcs cannot fit.
 
@@ -762,6 +761,7 @@ def _ease_remaining_turns(
     if len(run) < 3:
         return list(run), 0
     result = list(run)
+    source_path = LineString(original_reference if original_reference is not None else run)
     changed = 0
     # Each accepted curve removes at least one sharp vertex. The bounded
     # search also prevents a pathological OSM zigzag from oscillating forever.
@@ -888,7 +888,12 @@ def _ease_remaining_turns(
                 candidate = [
                     *prefix[:-1], *arc, *suffix[1:],
                 ]
-                if not LineString(candidate).is_simple:
+                candidate_line = LineString(candidate)
+                if (
+                    not candidate_line.is_simple
+                    or candidate_line.hausdorff_distance(source_path)
+                    > _MAX_CORRIDOR_DEVIATION_METRES
+                ):
                     continue
                 result = candidate
                 changed += 1
@@ -1226,6 +1231,7 @@ def write_osm_road_ways(
         )
         run, eased = _ease_remaining_turns(
             run, owner=owner, width=width, clearance=clearance,
+            original_reference=original,
         )
         smoothed_bends += rounded
         softened_rural_straights += softened
