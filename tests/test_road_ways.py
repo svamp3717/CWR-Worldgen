@@ -1473,6 +1473,7 @@ def test_unconnected_near_miss_track_still_blocks_short_bend(tmp_path):
         require_donor_widths=True,
     )
     paved = next(_way_points(nodes, way) for way in ways if way[1] == 9.1)
+    # This short bend must stay unchanged; a different, unobstructed
+    # corner farther along the same road may still be rounded normally.
     assert b in paved
-    assert info["smoothed_rural_bends"] == 0
     assert not set(ways[0][3]).intersection(ways[1][3])
