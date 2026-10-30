@@ -194,7 +194,10 @@ _JUNCTION_BEND_NECK_METRES = 8.0
 # Fix the remaining hard corners *at* the T/X node. The node does not move,
 # but both compatible through-road approaches share a new common tangent.
 _JUNCTION_FAIR_REACH_METRES = 30.0
-_JUNCTION_FAIR_MIN_LEG_METRES = 18.0
+# The game sample wg_osmways21 had a 9.1m-wide paved road with a
+# 27.6-degree bend at an actual T-junction. One through leg was only 14m,
+# so the old 18m threshold excluded it from through-junction fairing.
+_JUNCTION_FAIR_MIN_LEG_METRES = 12.0
 _JUNCTION_FAIR_MIN_TURN_DEGREES = 16.0
 _JUNCTION_FAIR_MAX_TURN_DEGREES = 95.0
 _JUNCTION_FAIR_JOIN_GUARD_METRES = 16.0
@@ -1236,7 +1239,7 @@ def _fair_through_junctions(
                         continue
                     dist = math.dist(p, pts[neighbor])
                     if (
-                        dist < _JUNCTION_FAIR_MIN_LEG_METRES
+                        dist < max(_JUNCTION_FAIR_MIN_LEG_METRES, width + 2.0)
                         or _point_key(pts[neighbor]) in clearance.shared
                         or _point_key(pts[neighbor]) in clearance.omitted_approaches
                     ):
