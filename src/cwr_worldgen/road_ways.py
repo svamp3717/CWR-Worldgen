@@ -1143,11 +1143,20 @@ def _fair_through_junctions(
     working = [(owner, tags, width, list(points))
                for owner, tags, width, points in runs]
     nodes = sorted(clearance.shared)
+    # Index source graph membership once. Scanning all OSM roads at every
+    # junction is quadratic on large towns and 10k-way stress tests.
+    runs_by_junction: dict[tuple[int, int], set[int]] = defaultdict(set)
+    for index, (_, _, _, pts) in enumerate(working):
+        for p in pts:
+            key = _point_key(p)
+            if key in clearance.shared:
+                runs_by_junction[key].add(index)
     smoothed = 0
 
     def arms_at(key):
         arms = []
-        for index, (_, tags, width, pts) in enumerate(working):
+        for index in sorted(runs_by_junction.get(key, ())):
+            _, tags, width, pts = working[index]
             for j, p in enumerate(pts):
                 if _point_key(p) != key:
                     continue
@@ -1155,7 +1164,11 @@ def _fair_through_junctions(
                     if not 0 <= neighbor < len(pts):
                         continue
                     dist = math.dist(p, pts[neighbor])
-                    if dist < _JUNCTION_FAIR_MIN_LEG_METRES:
+                    if (
+                        dist < _JUNCTION_FAIR_MIN_LEG_METRES
+                        or _point_key(pts[neighbor]) in clearance.shared
+                        or _point_key(pts[neighbor]) in clearance.omitted_approaches
+                    ):
                         continue
                     outward = ((pts[neighbor][0] - p[0]) / dist,
                                (pts[neighbor][1] - p[1]) / dist)
@@ -1245,7 +1258,14 @@ def _fair_through_junctions(
     for key in nodes:
         if key in clearance.omitted_approaches:
             continue
+        # An OSM node with thousands of overlapping or coincident ways is
+        # not a meaningful T/X junction. In addition to being ambiguous,
+        # testing all pairings would be quadratic.
+        if len(runs_by_junction.get(key, ())) > 5:
+            continue
         arms = arms_at(key)
+        if len(arms) > 5:
+            continue
         choices = []
         for ai in range(len(arms)):
             for bi in range(ai + 1, len(arms)):
