@@ -191,6 +191,14 @@ _JUNCTION_CLEARANCE_METRES = 24.0
 # road near it for stable T/X geometry, instead of rejecting every corner
 # within a 24 m radius even when the actual curve is safely outside it.
 _JUNCTION_BEND_NECK_METRES = 8.0
+# Fix the remaining hard corners *at* the T/X node. The node does not move,
+# but both compatible through-road approaches share a new common tangent.
+_JUNCTION_FAIR_REACH_METRES = 30.0
+_JUNCTION_FAIR_MIN_LEG_METRES = 18.0
+_JUNCTION_FAIR_MIN_TURN_DEGREES = 16.0
+_JUNCTION_FAIR_MAX_TURN_DEGREES = 95.0
+_JUNCTION_FAIR_JOIN_GUARD_METRES = 16.0
+_JUNCTION_FAIR_SAMPLE_METRES = 2.0
 # Tight settlement-aware turn rounding is allowed in unobstructed space.
 # Large rural shortcuts remain forbidden by the original terrain corridor.
 _SETTLEMENT_BEND_MAX_DEVIATION_METRES = 5.0
@@ -1121,6 +1129,181 @@ def _stock_bridge_axes(bridge_objects: Sequence[object]) -> list[LineString]:
     return axes
 
 
+def _fair_through_junctions(
+    runs: Sequence[_RoadRun], clearance: _BendClearance,
+) -> tuple[list[_RoadRun], int]:
+    """Keep shared road graph nodes fixed, but match through-road tangents.
+
+    A sharp turn *at* a T-junction is never reached by per-corner rounding:
+    moving the node would disconnect the side road. Instead pair the most
+    plausible continuation and reshape only its two approaches, producing
+    opposing, collinear tangent vectors at the unchanged junction. Endpoints
+    remain identical, so the CWR-CE RoadNet graph is still connected.
+    """
+    working = [(owner, tags, width, list(points))
+               for owner, tags, width, points in runs]
+    nodes = sorted(clearance.shared)
+    smoothed = 0
+
+    def arms_at(key):
+        arms = []
+        for index, (_, tags, width, pts) in enumerate(working):
+            for j, p in enumerate(pts):
+                if _point_key(p) != key:
+                    continue
+                for neighbor in (j - 1, j + 1):
+                    if not 0 <= neighbor < len(pts):
+                        continue
+                    dist = math.dist(p, pts[neighbor])
+                    if dist < _JUNCTION_FAIR_MIN_LEG_METRES:
+                        continue
+                    outward = ((pts[neighbor][0] - p[0]) / dist,
+                               (pts[neighbor][1] - p[1]) / dist)
+                    arms.append((index, j, neighbor, outward, dist,
+                                 _surface(tags), round(width, 3)))
+        return arms
+
+    def candidate_for(arm, common_tangent):
+        ri, j, neighbor, outward, dist, _, _ = arm
+        owner, _, width, pts = working[ri]
+        junction = pts[j]
+        reach = min(_JUNCTION_FAIR_REACH_METRES, dist * 0.85)
+        end = (junction[0] + outward[0] * reach,
+               junction[1] + outward[1] * reach)
+        handle = reach * 0.43
+        p1 = (junction[0] + common_tangent[0] * handle,
+              junction[1] + common_tangent[1] * handle)
+        p2 = (end[0] - outward[0] * handle,
+              end[1] - outward[1] * handle)
+        samples = max(10, math.ceil(reach / _JUNCTION_FAIR_SAMPLE_METRES))
+        arc = []
+        for k in range(samples + 1):
+            t = k / samples
+            u = 1.0 - t
+            x = u**3 * junction[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t**3 * end[0]
+            z = u**3 * junction[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t**3 * end[1]
+            p = (round(x, _COORD_DECIMALS), round(z, _COORD_DECIMALS))
+            if not arc or p != arc[-1]:
+                arc.append(p)
+        arc[0] = junction
+        arc[-1] = (round(end[0], _COORD_DECIMALS),
+                   round(end[1], _COORD_DECIMALS))
+        if len(arc) < 4:
+            return None
+        source = LineString((junction, pts[neighbor]))
+        curve = LineString(arc)
+        if not curve.is_simple or curve.hausdorff_distance(source) > 10.0:
+            return None
+        footprint = curve.buffer(width * 0.5 + _ROAD_SHOULDER_CLEARANCE_METRES)
+        x0, z0, x1, z1 = footprint.bounds
+        if min(x0, z0) < 0 or max(x1, z1) >= clearance.limit:
+            return None
+        if clearance._intersects(
+            clearance.obstacles, clearance.obstacle_shapes, footprint,
+        ):
+            return None
+        if clearance._intersects(
+            clearance.settlements, clearance.settlement_shapes, footprint,
+        ) and curve.hausdorff_distance(source) > _SETTLEMENT_BEND_MAX_DEVIATION_METRES:
+            return None
+        # Road surfaces may naturally overlap at a genuine shared junction.
+        # Beyond the junction halo, however, the new ribbon must keep the
+        # same clearances as normal bend smoothing.
+        far = substring(curve, min(curve.length * 0.55,
+                                   _JUNCTION_FAIR_JOIN_GUARD_METRES),
+                        curve.length)
+        for found in clearance.roads.query(
+            far.buffer(width * 0.5 + 28.0)
+        ) if clearance.roads is not None else ():
+            other = int(found)
+            if clearance.road_owners[other] == owner:
+                continue
+            if far.distance(clearance.road_shapes[other]) <= (
+                width * 0.5 + clearance.road_half_widths[other]
+                + _ROAD_SHOULDER_CLEARANCE_METRES
+            ):
+                return None
+
+        if neighbor == j + 1:
+            replacement = (
+                pts[:j + 1] + arc[1:] + pts[neighbor:]
+            )
+        else:
+            reverse_arc = list(reversed(arc))
+            replacement = pts[:neighbor + 1] + reverse_arc + pts[j + 1:]
+        # The terminal interpolation point coincides with the pre-existing
+        # adjacent endpoint only when reach equals the full leg (normally it
+        # does not); remove duplicate points before topology validation.
+        cleaned = [replacement[0]]
+        for point in replacement[1:]:
+            if point != cleaned[-1]:
+                cleaned.append(point)
+        if not LineString(cleaned).is_simple:
+            return None
+        return cleaned
+
+    for key in nodes:
+        if key in clearance.omitted_approaches:
+            continue
+        arms = arms_at(key)
+        choices = []
+        for ai in range(len(arms)):
+            for bi in range(ai + 1, len(arms)):
+                a, b = arms[ai], arms[bi]
+                if a[5:] != b[5:]:
+                    continue
+                if a[0] == b[0] and a[2] == b[2]:
+                    continue
+                # Outward directions point away from the junction, so two
+                # nearly opposite legs define a straight through-road.
+                cosine = max(-1.0, min(1.0,
+                    -(a[3][0] * b[3][0] + a[3][1] * b[3][1])))
+                turn = math.degrees(math.acos(cosine))
+                if not (_JUNCTION_FAIR_MIN_TURN_DEGREES <= turn
+                        <= _JUNCTION_FAIR_MAX_TURN_DEGREES):
+                    continue
+                # A continuous original OSM way is stronger evidence of a
+                # through-road than a nearby, separately tagged branch.
+                score = turn - (30.0 if a[0] == b[0] else 0.0)
+                choices.append((score, turn, ai, bi))
+        if not choices:
+            continue
+        choices.sort()
+        if len(choices) > 1 and choices[1][0] - choices[0][0] < 12.0:
+            continue
+        _, _, ai, bi = choices[0]
+        first, second = arms[ai], arms[bi]
+        axis = (first[3][0] - second[3][0],
+                first[3][1] - second[3][1])
+        norm = math.hypot(*axis)
+        if norm < 0.1:
+            continue
+        shared_tangent = (axis[0] / norm, axis[1] / norm)
+        candidate_a = candidate_for(first, shared_tangent)
+        candidate_b = candidate_for(second, (-shared_tangent[0],
+                                              -shared_tangent[1]))
+        if candidate_a is None or candidate_b is None:
+            continue
+        if first[0] == second[0]:
+            # Each arm may increase point count. Apply them in decreasing
+            # vertex-index order so the other junction index stays valid.
+            patches = sorted(((first, candidate_a), (second, candidate_b)),
+                             key=lambda item: item[0][1], reverse=True)
+            # Both patches were built from the same untouched original run.
+            # Recompute the second patch against the first after insertion.
+            # Avoid this ambiguity for now; we still safely handle split
+            # source ways and the much more common T-junction case below.
+            continue
+        trial = {first[0]: candidate_a, second[0]: candidate_b}
+        if any(not LineString(points).is_simple for points in trial.values()):
+            continue
+        for index, pts in trial.items():
+            owner, tags, width, _ = working[index]
+            working[index] = (owner, tags, width, pts)
+        smoothed += 1
+    return working, smoothed
+
+
 def write_osm_road_ways(
     path: Path,
     dataset: OsmDataset,
@@ -1242,6 +1425,7 @@ def write_osm_road_ways(
     repaired_rural_kinks = 0
     softened_rural_straights = 0
     eased_residual_turns = 0
+    prepared_runs = []
     for owner, tags, width, original in source_runs:
         repaired_run, repaired = _repair_short_p3d_kinks(
             original, owner=owner, width=width, clearance=clearance,
@@ -1260,6 +1444,11 @@ def write_osm_road_ways(
         smoothed_bends += rounded
         softened_rural_straights += softened
         eased_residual_turns += eased
+        prepared_runs.append((owner, tags, width, run))
+    prepared_runs, smoothed_junctions = _fair_through_junctions(
+        prepared_runs, clearance,
+    )
+    for owner, tags, width, run in prepared_runs:
         for index in range(0, len(run) - 1, _MAX_NODES_PER_WAY - 1):
             chunk = run[index:index + _MAX_NODES_PER_WAY]
             if len(chunk) < 2:
@@ -1310,6 +1499,7 @@ def write_osm_road_ways(
         "stock_bridge_modules": len(stock_bridge_axes),
         "smoothed_rural_bends": smoothed_bends,
         "eased_residual_turns": eased_residual_turns,
+        "smoothed_junction_through_roads": smoothed_junctions,
         "repaired_rural_kinks": repaired_rural_kinks,
         "softened_rural_straights": softened_rural_straights,
         "merged_source_runs": original_run_count - len(source_runs),
