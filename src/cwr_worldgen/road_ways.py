@@ -353,6 +353,12 @@ class _BendClearance:
         self.shared = {
             key for key, owners in owners_by_point.items() if len(owners) > 1
         }
+        # Record which way owners actually meet at each OSM graph node.
+        # An already-connected side road may legitimately overlap the main
+        # road's shoulder; a nearby *unconnected* road must remain an obstacle.
+        self.shared_owners = {
+            key: frozenset(owners_by_point[key]) for key in self.shared
+        }
         shared_points = [Point(*point_coords[key]) for key in sorted(self.shared)]
         self.junctions = STRtree(shared_points) if shared_points else None
         self.junction_points = shared_points
@@ -485,10 +491,25 @@ class _BendClearance:
             # the old corner: a bend 15m before a T-junction is fine if it
             # ends with a suitable straight neck.
             guard = max(_JUNCTION_BEND_NECK_METRES, width + 2.0)
-            if self._intersects(
-                self.junctions, self.junction_points,
-                curve_line.buffer(guard),
-            ):
+            for found in self.junctions.query(curve_line.buffer(guard)):
+                joint = self.junction_points[int(found)]
+                key = _point_key((joint.x, joint.y))
+                # Keep the shared vertex exactly where it is. When an arc
+                # starts a few metres after that vertex, don't reject it
+                # merely because the old and new roads are both nearby.
+                # This is common on OSM roads with a tiny 6-10m link after
+                # a track T-junction.
+                old_distance = (
+                    original_path.distance(joint)
+                    if original_path is not None else float("inf")
+                )
+                new_distance = curve_line.distance(joint)
+                if (
+                    owner in self.shared_owners.get(key, ())
+                    and old_distance < guard
+                    and new_distance >= max(0.25, old_distance - 0.25)
+                ):
+                    continue
                 return False
         if self._intersects(self.settlements, self.settlement_shapes, footprint):
             # Place markers and broad urban polygons are poor proxies for
@@ -513,6 +534,42 @@ class _BendClearance:
                     <= width * 0.5 + self.road_half_widths[index]
                     + _ROAD_SHOULDER_CLEARANCE_METRES
                 ):
+                    other_owner = self.road_owners[index]
+                    if original_path is not None and self.junctions is not None:
+                        # At a *real shared junction*, the existing ribbons
+                        # already overlap. Accept a small fillet only when it
+                        # creates NO new overlap with the connected side road.
+                        # Keep all ordinary parallel/near-miss roads protected.
+                        connected_nearby = any(
+                            owner in self.shared_owners.get(
+                                _point_key((
+                                    self.junction_points[int(j)].x,
+                                    self.junction_points[int(j)].y,
+                                )), ()
+                            )
+                            and other_owner in self.shared_owners.get(
+                                _point_key((
+                                    self.junction_points[int(j)].x,
+                                    self.junction_points[int(j)].y,
+                                )), ()
+                            )
+                            for j in self.junctions.query(
+                                curve_line.buffer(_JUNCTION_CLEARANCE_METRES)
+                            )
+                        )
+                        if connected_nearby:
+                            new_area = footprint.difference(
+                                original_path.buffer(
+                                    width * 0.5
+                                    + _ROAD_SHOULDER_CLEARANCE_METRES + 0.25
+                                )
+                            )
+                            if not new_area.intersects(
+                                self.road_shapes[index].buffer(
+                                    self.road_half_widths[index]
+                                )
+                            ):
+                                continue
                     return False
         return True
 
@@ -621,7 +678,18 @@ def _round_rural_bends(
             # Isolated two-leg turns can be rounded compactly when their
             # physical radius fits. A short leg INSIDE a longer chain,
             # however, may be part of a real hairpin or short zigzag.
-            if len(run) != 3 or min(before, after) < 7.0:
+            # A short link immediately after a known shared junction is
+            # precisely where donor-width roads acquire the visible miter
+            # seen in actual .ways exports. The shared node stays fixed,
+            # and the full width/overlap safety tests below still apply.
+            connected_leg = (
+                _point_key(a) in clearance.shared
+                or _point_key(c) in clearance.shared
+            )
+            if not (
+                (len(run) == 3 and min(before, after) >= 7.0)
+                or (connected_leg and min(before, after) >= 6.0)
+            ):
                 continue
         incoming = ((b[0] - a[0]) / before, (b[1] - a[1]) / before)
         outgoing = ((c[0] - b[0]) / after, (c[1] - b[1]) / after)
