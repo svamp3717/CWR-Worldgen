@@ -168,6 +168,29 @@ these newly aligned approaches**. This prevents it from restoring the sharp
 heading change at the shared point. The manifest reports accepted junctions
 under `road_ways.smoothed_junction_through_roads`.
 
+### Short bends immediately after connected junctions (Lundby fix)
+
+A real `wg_osmways20.pbo` road sample exposed a remaining case: a
+**39.4-degree paved turn** at approximately **X=4666, Z=4633** follows
+a track T-junction by just **7.1 m**. The selected paved P3D donor makes the
+road **9.1 m wide**. Previously the 16 m minimum-leg check and an
+11.1 m junction buffer rejected this turn even though a short circular
+fillet could fit while retaining the shared track endpoint.
+
+The exporter now also considers **6 m+ legs immediately beside a genuine,
+exactly shared OSM junction**. The shared node is kept in place; the
+curve must pass the same width-aware minimum-radius, source-corridor,
+building/water, and self-intersection checks as before. Its overlap with
+a connected side road is allowed **only where the old roadway already
+overlapped that side road**; the new road ribbon must create no extra
+overlap. Nearby roads with separate or almost-matching endpoints still
+block smoothing. These narrow changes do not relax genuine junction
+topology and bridge/tunnel protection.
+
+The regression test uses translated real coordinates from the provided
+Lundby OSM input and `wg_osmways20.ways` output, including the gravel
+branch that previously blocked the visible bend.
+
 ### Gentle curves on long straight sections
 
 Corner rounding alone leaves long OSM straight lines completely straight.
