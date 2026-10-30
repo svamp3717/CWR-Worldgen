@@ -1387,3 +1387,91 @@ def test_junction_fairing_does_not_change_bridge_transition(tmp_path):
     )
     assert info["smoothed_junction_through_roads"] == 0
     assert sum(center in _way_points(nodes, way) for way in ways) == 2
+
+
+
+def test_real_lundby_short_bend_after_connected_track_junction_is_smoothed(tmp_path):
+    """Regression from wg_osmways20: the paved main road had a 39.4° kink.
+
+    Actual projected OSM points near X4666 Z4633, translated so the test
+    fits a 1000m world. The track joins at A, just 7.1m *before* corner B.
+    Previously the 16m minimum-leg and 11.1m junction guards together
+    prevented smoothing despite ample room in the original road corridor.
+    """
+    from shapely.geometry import LineString
+    import math
+
+    a = (368, 426)
+    b = (365.75, 432.75)
+    c = (339.50, 449.25)
+    main = OsmLineFeature(
+        "way/511679435",
+        {"highway": "unclassified", "width": "9.1", "surface": "paved"},
+        tuple(_ll(*p) for p in (
+            (380.75, 393.75), a, b, c, (331.25, 462),
+        )),
+    )
+    track = OsmLineFeature(
+        "way/946036895",
+        {"highway": "track", "surface": "gravel"},
+        tuple(_ll(*p) for p in (a, (378.5, 459.75), (404.75, 492.75))),
+    )
+    info, nodes, ways, first_bytes = _export(
+        tmp_path, [main, track], world_size=1000,
+        surface_widths={"paved": 9.1, "gravel": 3.5},
+        require_donor_widths=True,
+    )
+    paved = next(_way_points(nodes, way) for way in ways if way[1] == 9.1)
+    gravel = next(_way_points(nodes, way) for way in ways if way[1] == 3.5)
+    assert info["smoothed_rural_bends"] >= 1
+    assert b not in paved
+    assert a in paved and a in gravel
+    assert len(set(ways[0][3]) & set(ways[1][3])) == 1
+
+    # The physical turning angle is no longer concentrated in one road link.
+    def turns(path):
+        return [
+            math.degrees(math.acos(max(-1, min(1,
+                ((q[0]-p[0])*(r[0]-q[0]) + (q[1]-p[1])*(r[1]-q[1]))
+                / math.dist(p, q) / math.dist(q, r)
+            ))))
+            for p, q, r in zip(path, path[1:], path[2:])
+        ]
+    assert max(turns(paved)) < 20.0
+    original = LineString((
+        (380.75, 393.75), a, b, c, (331.25, 462),
+    ))
+    assert LineString(paved).hausdorff_distance(original) < 5.0
+    assert _export(
+        tmp_path, [track, main], world_size=1000,
+        surface_widths={"paved": 9.1, "gravel": 3.5},
+        require_donor_widths=True,
+    )[3] == first_bytes
+
+
+def test_unconnected_near_miss_track_still_blocks_short_bend(tmp_path):
+    # A track running close to the bend without an exact shared endpoint
+    # must not gain an artificial crossroad or overlapping asphalt.
+    a = (368, 426)
+    b = (365.75, 432.75)
+    main = OsmLineFeature(
+        "way/main", {"highway": "unclassified", "width": "9.1"},
+        tuple(_ll(*p) for p in (
+            (380.75, 393.75), a, b, (339.5, 449.25), (331.25, 462),
+        )),
+    )
+    nearby = OsmLineFeature(
+        "way/parallel", {"highway": "track", "surface": "gravel"},
+        tuple(_ll(*p) for p in (
+            (368.2, 426.3), (378.5, 459.75), (404.75, 492.75),
+        )),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [main, nearby], world_size=1000,
+        surface_widths={"paved": 9.1, "gravel": 3.5},
+        require_donor_widths=True,
+    )
+    paved = next(_way_points(nodes, way) for way in ways if way[1] == 9.1)
+    assert b in paved
+    assert info["smoothed_rural_bends"] == 0
+    assert not set(ways[0][3]).intersection(ways[1][3])
