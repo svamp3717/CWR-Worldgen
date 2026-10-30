@@ -1477,3 +1477,28 @@ def test_unconnected_near_miss_track_still_blocks_short_bend(tmp_path):
     # corner farther along the same road may still be rounded normally.
     assert b in paved
     assert not set(ways[0][3]).intersection(ways[1][3])
+
+
+
+def test_real_lundby_short_bend_next_to_bridge_entrance_remains_fixed(tmp_path):
+    """The connected-road exception must never round a stock bridge seam."""
+    a, b = (368, 426), (365.75, 432.75)
+    main = OsmLineFeature(
+        "way/main", {"highway": "unclassified", "surface": "paved",
+                     "width": "9.1"},
+        tuple(_ll(*p) for p in (
+            (380.75, 393.75), a, b, (339.5, 449.25), (331.25, 462),
+        )),
+    )
+    bridge = OsmLineFeature(
+        "way/bridge", {"highway": "tertiary", "bridge": "yes"},
+        tuple(_ll(*p) for p in (a, (378.5, 459.75))),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [main, bridge], world_size=1000,
+        surface_widths={"paved": 9.1}, require_donor_widths=True,
+    )
+    assert info["excluded_bridge_features"] == 1
+    assert len(ways) == 1
+    points = _way_points(nodes, ways[0])
+    assert a in points and b in points
