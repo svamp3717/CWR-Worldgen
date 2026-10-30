@@ -149,12 +149,16 @@ def _runs(
 
 # Conservative limits keep the new curve close to the graded OSM road
 # corridor, rather than letting a cosmetic improvement cut across a field.
-_MIN_LEG_METRES = 16.0
+_MIN_LEG_METRES = 7.0
 _MIN_BEND_DEGREES = 18.0
 _MAX_BEND_DEGREES = 160.0
 _MAX_TANGENT_METRES = 52.0
 _MIN_CURVE_RADIUS_METRES = 5.0
 _BEND_MAX_LEG_SHARE = 0.42
+_BEND_ISOLATED_LEG_SHARE = 0.82
+_RESIDUAL_BEND_WINDOW_METRES = (32.0, 24.0, 17.0, 12.0)
+_RESIDUAL_BEND_MIN_ANGLE_DEGREES = 19.0
+_RESIDUAL_BEND_MAX_DEVIATION_METRES = 10.0
 _BEND_SAMPLE_SPACING_METRES = 1.8
 _MAX_CORRIDOR_DEVIATION_METRES = 14.0
 # The P3D fitter already identifies tight corners that cannot fit a physical
@@ -623,10 +627,30 @@ def _round_rural_bends(
         tan_half = math.tan(half_angle)
         min_radius = max(_MIN_CURVE_RADIUS_METRES, width * 0.65 + 1.0)
         desired_radius = max(min_radius, 10.0 + min(before, after) * 0.22)
+        # Two neighboring bends must share an OSM segment, so both can
+        # consume at most 42%. An isolated corner may use much more of its
+        # short approach (without touching its endpoints), avoiding a
+        # hard square turn between otherwise smooth sections.
+        earlier_bend = (
+            i > 1 and
+            _turn_degrees(run[i-2], a, b) >= _MIN_BEND_DEGREES
+        )
+        later_bend = (
+            i < len(run)-2 and
+            _turn_degrees(b, c, run[i+2]) >= _MIN_BEND_DEGREES
+        )
+        in_share = (
+            _BEND_MAX_LEG_SHARE if earlier_bend
+            else _BEND_ISOLATED_LEG_SHARE
+        )
+        out_share = (
+            _BEND_MAX_LEG_SHARE if later_bend
+            else _BEND_ISOLATED_LEG_SHARE
+        )
         maximum_trim = min(
             _MAX_TANGENT_METRES,
-            before * _BEND_MAX_LEG_SHARE,
-            after * _BEND_MAX_LEG_SHARE,
+            before * in_share,
+            after * out_share,
             desired_radius * tan_half,
         )
         if maximum_trim < min_radius * tan_half:
@@ -716,6 +740,165 @@ def _round_rural_bends(
     if not LineString(result).is_simple:
         return list(run), 0
     return result, len(rounded)
+
+
+
+def _ease_remaining_turns(
+    run: Sequence[tuple[float, float]],
+    *,
+    owner: int,
+    width: float,
+    clearance: _BendClearance,
+) -> tuple[list[tuple[float, float]], int]:
+    """Fair residual short OSM zigzags that single-corner arcs cannot fit.
+
+    The P3D road generator repairs compact sequences of corners rather than
+    forcing a rigid piece onto every original vertex. Use a similar *window*
+    here: replace several little bends with a single cubic from the existing
+    heading at the beginning to the existing heading at the end. Shared nodes
+    and the ends of bridges/tunnels are never moved, and the whole path must
+    remain close to its graded OSM corridor.
+    """
+    if len(run) < 3:
+        return list(run), 0
+    result = list(run)
+    changed = 0
+    # Each accepted curve removes at least one sharp vertex. The bounded
+    # search also prevents a pathological OSM zigzag from oscillating forever.
+    for _ in range(min(60, len(run))):
+        path = LineString(result)
+        if not path.is_simple:
+            break
+        distances = [0.0]
+        for p, q in zip(result, result[1:]):
+            distances.append(distances[-1] + math.dist(p, q))
+        total = distances[-1]
+        accepted = False
+        for i in range(1, len(result) - 1):
+            corner = result[i]
+            key = _point_key(corner)
+            if key in clearance.shared or key in clearance.omitted_approaches:
+                continue
+            angle = _turn_degrees(result[i-1], corner, result[i+1])
+            if not _RESIDUAL_BEND_MIN_ANGLE_DEGREES <= angle <= _MAX_BEND_DEGREES:
+                continue
+            for reach in _RESIDUAL_BEND_WINDOW_METRES:
+                start = distances[i] - reach
+                stop = distances[i] + reach
+                if start <= 0 or stop >= total:
+                    continue
+                # Protect all graph nodes, including an interior node that a
+                # long smoothing window might otherwise silently erase.
+                inside = result[i-1:i+2]
+                if any(
+                    _point_key(p) in clearance.shared
+                    or _point_key(p) in clearance.omitted_approaches
+                    for p in inside[1:-1]
+                ):
+                    continue
+                if any(
+                    start + 0.001 < d < stop - 0.001 and (
+                        _point_key(p) in clearance.shared
+                        or _point_key(p) in clearance.omitted_approaches
+                    )
+                    for p, d in zip(result, distances)
+                ):
+                    continue
+                entry = path.interpolate(start)
+                exit = path.interpolate(stop)
+                # The tangent comes from the old road just beyond either
+                # boundary, so the cubic blends into the untouched road.
+                before = path.interpolate(max(0.0, start - 0.15))
+                after = path.interpolate(min(total, stop + 0.15))
+                in_length = entry.distance(before)
+                out_length = exit.distance(after)
+                if min(in_length, out_length) < 0.001:
+                    continue
+                incoming = (
+                    (entry.x - before.x) / in_length,
+                    (entry.y - before.y) / in_length,
+                )
+                outgoing = (
+                    (after.x - exit.x) / out_length,
+                    (after.y - exit.y) / out_length,
+                )
+                chord = entry.distance(exit)
+                if chord < max(width * 1.5, 5.0):
+                    continue
+                handle = min(reach * 0.7, chord * 0.46)
+                p0 = (entry.x, entry.y)
+                p3 = (exit.x, exit.y)
+                p1 = (p0[0] + handle*incoming[0], p0[1] + handle*incoming[1])
+                p2 = (p3[0] - handle*outgoing[0], p3[1] - handle*outgoing[1])
+                samples = max(10, math.ceil(2*reach / _BEND_SAMPLE_SPACING_METRES))
+                arc: list[tuple[float, float]] = []
+                for k in range(samples + 1):
+                    t = k / samples
+                    u = 1.0 - t
+                    x = (u**3*p0[0] + 3*u*u*t*p1[0]
+                         + 3*u*t*t*p2[0] + t**3*p3[0])
+                    z = (u**3*p0[1] + 3*u*u*t*p1[1]
+                         + 3*u*t*t*p2[1] + t**3*p3[1])
+                    point = (round(x, _COORD_DECIMALS),
+                             round(z, _COORD_DECIMALS))
+                    if not arc or point != arc[-1]:
+                        arc.append(point)
+                if len(arc) < 3:
+                    continue
+                old_window = substring(path, start, stop)
+                curve = LineString(arc)
+                if (
+                    not curve.is_simple
+                    or curve.hausdorff_distance(old_window)
+                    > min(_MAX_CORRIDOR_DEVIATION_METRES,
+                          _RESIDUAL_BEND_MAX_DEVIATION_METRES)
+                    or not clearance.allows(
+                        owner, corner, arc, width, original_path=old_window,
+                    )
+                ):
+                    continue
+                # Match the P3D fitter's minimum radius and turn-step
+                # constraints, or this "smooth" shape could still fold a
+                # wide roadway inside a tight S-bend.
+                minimum_radius = max(
+                    _MIN_CURVE_RADIUS_METRES,
+                    width * 0.5 + _PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES,
+                )
+                good = True
+                for a, b, c in zip(arc, arc[1:], arc[2:]):
+                    cross = abs((b[0]-a[0])*(c[1]-b[1])
+                                - (b[1]-a[1])*(c[0]-b[0]))
+                    if cross < 1e-6:
+                        continue
+                    radius = (
+                        math.dist(a, b)*math.dist(b, c)*math.dist(a, c)
+                        / (2.0*cross)
+                    )
+                    if (
+                        radius < minimum_radius
+                        or _turn_degrees(a, b, c)
+                        > _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES
+                    ):
+                        good = False
+                        break
+                if not good:
+                    continue
+                prefix = list(substring(path, 0, start).coords)
+                suffix = list(substring(path, stop, total).coords)
+                candidate = [
+                    *prefix[:-1], *arc, *suffix[1:],
+                ]
+                if not LineString(candidate).is_simple:
+                    continue
+                result = candidate
+                changed += 1
+                accepted = True
+                break
+            if accepted:
+                break
+        if not accepted:
+            break
+    return result, changed
 
 
 def _flow_rural_straights(
@@ -1029,6 +1212,7 @@ def write_osm_road_ways(
     smoothed_bends = 0
     repaired_rural_kinks = 0
     softened_rural_straights = 0
+    eased_residual_turns = 0
     for owner, tags, width, original in source_runs:
         repaired_run, repaired = _repair_short_p3d_kinks(
             original, owner=owner, width=width, clearance=clearance,
@@ -1040,8 +1224,12 @@ def write_osm_road_ways(
         run, softened = _flow_rural_straights(
             run, owner=owner, tags=tags, width=width, clearance=clearance,
         )
+        run, eased = _ease_remaining_turns(
+            run, owner=owner, width=width, clearance=clearance,
+        )
         smoothed_bends += rounded
         softened_rural_straights += softened
+        eased_residual_turns += eased
         for index in range(0, len(run) - 1, _MAX_NODES_PER_WAY - 1):
             chunk = run[index:index + _MAX_NODES_PER_WAY]
             if len(chunk) < 2:
@@ -1091,6 +1279,7 @@ def write_osm_road_ways(
         "unmatched_bridge_features": unmatched_bridge_features,
         "stock_bridge_modules": len(stock_bridge_axes),
         "smoothed_rural_bends": smoothed_bends,
+        "eased_residual_turns": eased_residual_turns,
         "repaired_rural_kinks": repaired_rural_kinks,
         "softened_rural_straights": softened_rural_straights,
         "merged_source_runs": original_run_count - len(source_runs),
