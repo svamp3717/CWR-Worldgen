@@ -59,8 +59,9 @@ to long merged chains.
 
 Rural bends use sampled **cubic circular-arc approximations** with
 tangent-continuity at both ends. Sharp turns between **18° and 160°** are now
-eligible when both approach legs are at least **7 m**. The fitter tries the
-widest natural radius first, backs off around obstacles, then **binary-searches
+eligible when both approach legs are at least **16 m**, or **7 m for an
+isolated two-leg corner**. The fitter tries the widest natural radius first,
+backs off around obstacles, then **binary-searches
 the largest safe radius** between accepted/rejected sizes. This avoids abrupt
 size jumps between otherwise similar bends. The minimum radius is **at least
 5 m** and scales with exported
@@ -68,7 +69,7 @@ road width. Extremely tight hairpins or short legs that cannot accommodate
 that radius remain unchanged rather than producing unrealistic kinks.
 
 The maximum tangent trim is **52 m**. Two adjoining turns can each consume
-up to **42%** of a shared segment; an isolated corner can use up to **82%**
+up to **42%** of a shared segment; an isolated corner can use up to **62%**
 of its approach when no neighboring bend needs that space. The cubic arc is
 sampled at approximately **1.8 m** intervals and stays within **14 m**
 of the original OSM corridor in both directions. Adjacent
