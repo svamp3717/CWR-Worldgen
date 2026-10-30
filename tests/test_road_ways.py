@@ -1455,7 +1455,8 @@ def test_unconnected_near_miss_track_still_blocks_short_bend(tmp_path):
     a = (368, 426)
     b = (365.75, 432.75)
     main = OsmLineFeature(
-        "way/main", {"highway": "unclassified", "width": "9.1"},
+        "way/main", {"highway": "unclassified", "width": "9.1",
+                     "surface": "paved"},
         tuple(_ll(*p) for p in (
             (380.75, 393.75), a, b, (339.5, 449.25), (331.25, 462),
         )),
