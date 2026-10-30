@@ -1203,7 +1203,10 @@ def _fair_through_junctions(
                    round(end[1], _COORD_DECIMALS))
         if len(arc) < 4:
             return None
-        source = LineString((junction, pts[neighbor]))
+        # Compare the new curve to the *same local part* of the old leg.
+        # Using the whole 200m source segment would reject a valid 25m
+        # curve because symmetric Hausdorff distance sees its distant end.
+        source = LineString((junction, end))
         curve = LineString(arc)
         if not curve.is_simple or curve.hausdorff_distance(source) > 10.0:
             return None
