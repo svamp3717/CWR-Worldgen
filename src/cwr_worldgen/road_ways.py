@@ -1285,16 +1285,17 @@ def _fair_through_junctions(
         if candidate_a is None or candidate_b is None:
             continue
         if first[0] == second[0]:
-            # Each arm may increase point count. Apply them in decreasing
-            # vertex-index order so the other junction index stays valid.
-            patches = sorted(((first, candidate_a), (second, candidate_b)),
-                             key=lambda item: item[0][1], reverse=True)
-            # Both patches were built from the same untouched original run.
-            # Recompute the second patch against the first after insertion.
-            # Avoid this ambiguity for now; we still safely handle split
-            # source ways and the much more common T-junction case below.
-            continue
-        trial = {first[0]: candidate_a, second[0]: candidate_b}
+            # OSM often keeps the main through-road as one way containing
+            # the shared side-street node. Build each direction from the
+            # unchanged source, then splice precisely at that fixed node.
+            left = candidate_a if first[2] < first[1] else candidate_b
+            right = candidate_b if first[2] < first[1] else candidate_a
+            joint = working[first[0]][3][first[1]]
+            left_j = left.index(joint)
+            right_j = right.index(joint)
+            trial = {first[0]: left[:left_j] + right[right_j:]}
+        else:
+            trial = {first[0]: candidate_a, second[0]: candidate_b}
         if any(not LineString(points).is_simple for points in trial.values()):
             continue
         for index, pts in trial.items():
@@ -1421,12 +1422,16 @@ def write_osm_road_ways(
     }
     source_runs = _merge_compatible_runs(source_runs, non_ground_points)
     clearance = _BendClearance(dataset, projection, source_runs)
+    original_source_runs = source_runs
+    source_runs, smoothed_junctions = _fair_through_junctions(
+        source_runs, clearance,
+    )
     smoothed_bends = 0
     repaired_rural_kinks = 0
     softened_rural_straights = 0
     eased_residual_turns = 0
     prepared_runs = []
-    for owner, tags, width, original in source_runs:
+    for run_index, (owner, tags, width, original) in enumerate(source_runs):
         repaired_run, repaired = _repair_short_p3d_kinks(
             original, owner=owner, width=width, clearance=clearance,
         )
@@ -1439,15 +1444,12 @@ def write_osm_road_ways(
         )
         run, eased = _ease_remaining_turns(
             run, owner=owner, width=width, clearance=clearance,
-            original_reference=original,
+            original_reference=original_source_runs[run_index][3],
         )
         smoothed_bends += rounded
         softened_rural_straights += softened
         eased_residual_turns += eased
         prepared_runs.append((owner, tags, width, run))
-    prepared_runs, smoothed_junctions = _fair_through_junctions(
-        prepared_runs, clearance,
-    )
     for owner, tags, width, run in prepared_runs:
         for index in range(0, len(run) - 1, _MAX_NODES_PER_WAY - 1):
             chunk = run[index:index + _MAX_NODES_PER_WAY]
