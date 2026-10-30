@@ -610,7 +610,11 @@ def _round_rural_bends(
         before = math.dist(a, b)
         after = math.dist(b, c)
         if min(before, after) < _MIN_LEG_METRES:
-            continue
+            # Isolated two-leg turns can be rounded compactly when their
+            # physical radius fits. A short leg INSIDE a longer chain,
+            # however, may be part of a real hairpin or short zigzag.
+            if len(run) != 3 or min(before, after) < 7.0:
+                continue
         incoming = ((b[0] - a[0]) / before, (b[1] - a[1]) / before)
         outgoing = ((c[0] - b[0]) / after, (c[1] - b[1]) / after)
         dot = max(-1.0, min(1.0, incoming[0] * outgoing[0] + incoming[1] * outgoing[1]))
