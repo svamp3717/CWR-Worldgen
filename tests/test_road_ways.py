@@ -1566,7 +1566,8 @@ def test_osmways21_actual_paved_junction_rounds_short_14m_arm(tmp_path):
 def test_short_junction_fairing_still_respects_neighboring_building(tmp_path):
     junction = (373.5003, 329.4998)
     main = OsmLineFeature(
-        "way/main", {"highway": "unclassified", "width": "9.1"},
+        "way/main", {"highway": "unclassified", "width": "9.1",
+                     "surface": "asphalt"},
         tuple(_ll(*point) for point in (
             (400.5002, 318.9997), (387, 325.7503), junction,
             (341.9999, 322.7503), (327.7498, 315.2502),
