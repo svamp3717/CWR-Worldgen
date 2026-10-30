@@ -1502,3 +1502,93 @@ def test_real_lundby_short_bend_next_to_bridge_entrance_remains_fixed(tmp_path):
     assert len(ways) == 1
     points = _way_points(nodes, ways[0])
     assert a in points and b in points
+
+
+
+def test_osmways21_actual_paved_junction_rounds_short_14m_arm(tmp_path):
+    """PBO regression: paved way279 at player X1488 Z3756, kink X1573 Z3829.
+
+    The original 9.1m-wide main line had a 27.6-degree turn at the
+    gravel-road T-junction, with its nearest paved approach only 14.01m.
+    Translate the exact local PBO vertex positions into a 1000m test map.
+    """
+    import math
+    from shapely.geometry import LineString
+
+    junction = (373.5003, 329.4998)
+    main = OsmLineFeature(
+        "way/main", {"highway": "unclassified", "surface": "asphalt",
+                     "width": "9.1"},
+        tuple(_ll(*point) for point in (
+            (400.5002, 318.9997),
+            (387.0, 325.7503),
+            junction,
+            (341.9999, 322.7503),
+            (327.7498, 315.2502),
+        )),
+    )
+    track = OsmLineFeature(
+        "way/branch", {"highway": "track", "surface": "gravel"},
+        tuple(_ll(*point) for point in (
+            junction, (378.7501, 340.0), (400.2497, 349.5001),
+        )),
+    )
+    info, nodes, ways, first_bytes = _export(
+        tmp_path, [main, track], world_size=1000,
+        surface_widths={"paved": 9.1, "gravel": 7.0},
+        require_donor_widths=True,
+    )
+    assert info["smoothed_junction_through_roads"] == 1
+    paved = next(_way_points(nodes, way) for way in ways if way[1] == 9.1)
+    gravel = next(_way_points(nodes, way) for way in ways if way[1] == 7.0)
+    assert junction in paved
+    assert junction in gravel
+    assert sum(junction in _way_points(nodes, way) for way in ways) == 2
+    i = paved.index(junction)
+    assert i > 0 and i < len(paved)-1
+    before = (junction[0] - paved[i-1][0],
+              junction[1] - paved[i-1][1])
+    after = (paved[i+1][0] - junction[0],
+             paved[i+1][1] - junction[1])
+    cosine = max(-1, min(1, (
+        (before[0]*after[0]+before[1]*after[1])
+        / math.hypot(*before) / math.hypot(*after)
+    )))
+    assert math.degrees(math.acos(cosine)) < 5.0
+    assert LineString(paved).is_simple
+    assert _export(
+        tmp_path, [track, main], world_size=1000,
+        surface_widths={"paved": 9.1, "gravel": 7.0},
+        require_donor_widths=True,
+    )[3] == first_bytes
+
+
+def test_short_junction_fairing_still_respects_neighboring_building(tmp_path):
+    junction = (373.5003, 329.4998)
+    main = OsmLineFeature(
+        "way/main", {"highway": "unclassified", "width": "9.1"},
+        tuple(_ll(*point) for point in (
+            (400.5002, 318.9997), (387, 325.7503), junction,
+            (341.9999, 322.7503), (327.7498, 315.2502),
+        )),
+    )
+    spur = OsmLineFeature(
+        "way/branch", {"highway": "track", "surface": "gravel"},
+        (_ll(*junction), _ll(378.7501, 340.0), _ll(400.2497, 349.5001)),
+    )
+    building = OsmPolygonFeature(
+        "building/close", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(*point) for point in (
+            (369, 330), (377, 330), (377, 335),
+            (369, 335), (369, 330),
+        ))),),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [main, spur], world_size=1000,
+        building_polygons=(building,),
+        surface_widths={"paved": 9.1, "gravel": 7.0},
+        require_donor_widths=True,
+    )
+    assert info["smoothed_junction_through_roads"] == 0
+    paved = next(_way_points(nodes, way) for way in ways if way[1] == 9.1)
+    assert junction in paved
