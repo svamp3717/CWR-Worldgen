@@ -149,13 +149,13 @@ def _runs(
 
 # Conservative limits keep the new curve close to the graded OSM road
 # corridor, rather than letting a cosmetic improvement cut across a field.
-_MIN_LEG_METRES = 7.0
+_MIN_LEG_METRES = 16.0
 _MIN_BEND_DEGREES = 18.0
 _MAX_BEND_DEGREES = 160.0
 _MAX_TANGENT_METRES = 52.0
 _MIN_CURVE_RADIUS_METRES = 5.0
 _BEND_MAX_LEG_SHARE = 0.42
-_BEND_ISOLATED_LEG_SHARE = 0.82
+_BEND_ISOLATED_LEG_SHARE = 0.62
 _RESIDUAL_BEND_WINDOW_METRES = (32.0, 24.0, 17.0, 12.0)
 _RESIDUAL_BEND_MIN_ANGLE_DEGREES = 19.0
 _RESIDUAL_BEND_MAX_DEVIATION_METRES = 10.0
@@ -626,7 +626,7 @@ def _round_rural_bends(
         half_angle = math.radians(angle) * 0.5
         tan_half = math.tan(half_angle)
         min_radius = max(_MIN_CURVE_RADIUS_METRES, width * 0.65 + 1.0)
-        desired_radius = max(min_radius, 10.0 + min(before, after) * 0.22)
+        desired_radius = max(min_radius, 8.0 + min(before, after) * 0.14)
         # Two neighboring bends must share an OSM segment, so both can
         # consume at most 42%. An isolated corner may use much more of its
         # short approach (without touching its endpoints), avoiding a
