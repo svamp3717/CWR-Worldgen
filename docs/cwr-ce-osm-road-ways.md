@@ -142,6 +142,32 @@ The manifest records accepted fairings as
 `road_ways.eased_residual_turns`. The original terrain grader still
 uses the source OSM route, so compare the result in-game.
 
+### Smooth paved through-roads at T/X junctions
+
+The previous bend passes avoided **the exact shared graph vertex**. CWR-CE's
+road renderer joins road-edge offsets at every centerline node, so an angular
+through-road at that junction still showed a sharp, widened corner even after
+nearby bends were rounded. The new pass handles this specific case.
+
+For a clear T/X junction, Worldgen selects an unambiguous compatible
+through-road pairing (same rendered material and width, preferring both
+halves of the original OSM way), and shapes approximately the last/first
+**30 m** on either side with cubic arcs whose *tangents meet* at the shared
+node. **The junction point is not relocated**; the side road retains the
+same exact node ID and its existing geometry. This works both when the
+through-road is a single OSM feature and when it is split at the junction.
+
+Curves are limited by the existing grade corridor (at most **10 m** local
+deviation, or **5 m** within settlements). They are rejected where buildings,
+water, nearby roads outside the normal junction overlap, map boundaries,
+or other protected graph nodes make them unsafe. Bridge and tunnel joins
+are excluded. Ambiguous multi-road junctions are not guessed.
+
+Importantly, the later long-rural-straight S-curve pass **does not overwrite
+these newly aligned approaches**. This prevents it from restoring the sharp
+heading change at the shared point. The manifest reports accepted junctions
+under `road_ways.smoothed_junction_through_roads`.
+
 ### Gentle curves on long straight sections
 
 Corner rounding alone leaves long OSM straight lines completely straight.
