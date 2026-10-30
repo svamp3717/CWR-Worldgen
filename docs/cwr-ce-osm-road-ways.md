@@ -59,16 +59,19 @@ to long merged chains.
 
 Rural bends use sampled **cubic circular-arc approximations** with
 tangent-continuity at both ends. Sharp turns between **18° and 160°** are now
-eligible when both approach legs are at least **16 m**. The fitter tries the
-widest natural radius first, then progressively smaller radii if the proposed
-curve would leave the terrain-grading corridor or conflict with nearby
-features. The minimum radius is **at least 5 m** and scales with exported
+eligible when both approach legs are at least **7 m**. The fitter tries the
+widest natural radius first, backs off around obstacles, then **binary-searches
+the largest safe radius** between accepted/rejected sizes. This avoids abrupt
+size jumps between otherwise similar bends. The minimum radius is **at least
+5 m** and scales with exported
 road width. Extremely tight hairpins or short legs that cannot accommodate
 that radius remain unchanged rather than producing unrealistic kinks.
 
-The maximum tangent trim is now **52 m**, or at most **42%** of either approach.
-The cubic arc is sampled at approximately **1.8 m** intervals and never
-strays more than **14 m** from the original OSM source centerline. Adjacent
+The maximum tangent trim is **52 m**. Two adjoining turns can each consume
+up to **42%** of a shared segment; an isolated corner can use up to **82%**
+of its approach when no neighboring bend needs that space. The cubic arc is
+sampled at approximately **1.8 m** intervals and stays within **14 m**
+of the original OSM corridor in both directions. Adjacent
 curves are rejected together if their combined path would self-intersect.
 This also handles previously unrounded turns above 135° without adding
 roadway over unsafe shortcuts.
@@ -115,6 +118,28 @@ around settlements. Endpoints always remain fixed.
 
 Worldgen still grades terrain against the original OSM road centerline;
 inspect steep slopes and built-up intersections in-game after regeneration.
+
+### Fairing the remaining short S-bends
+
+Longer roads sometimes contain **several closely spaced OSM vertices**.
+Smoothing each separately can leave a visible angular zigzag, especially
+on curves leading toward a T-junction. After regular corner fitting,
+Worldgen now scans for remaining turns of **19° or more**. When possible,
+it replaces a local **12–32 m window** with a tangent-matched cubic that
+smooths several small corners *together*.
+
+The new path must preserve all connected junction vertices and bridge/tunnel
+approaches, pass the same road-width-aware curvature and clearance tests as
+ordinary bends, and remain within **14 m of the original OSM centerline**
+even after multiple smoothing passes. Individual fairing windows stay within
+**10 m of the local source**, while urban bends retain the stricter
+**5 m** limit. Wide donors are checked at their measured width.
+
+This is not a universal spline that can cut across any intersection:
+where a safe window cannot be found, the original geometry is retained.
+The manifest records accepted fairings as
+`road_ways.eased_residual_turns`. The original terrain grader still
+uses the source OSM route, so compare the result in-game.
 
 ### Gentle curves on long straight sections
 
