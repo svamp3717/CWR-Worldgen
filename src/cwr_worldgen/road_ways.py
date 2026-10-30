@@ -1312,6 +1312,37 @@ def _fair_through_junctions(
                 width * 0.5 + clearance.road_half_widths[other]
                 + _ROAD_SHOULDER_CLEARANCE_METRES
             ):
+                # A real T-junction necessarily overlaps its side-road
+                # ribbon. On very short (12-18m) through-road arms, the old
+                # 16m "far" trim remains inside that existing overlap and
+                # incorrectly rejects the otherwise smooth junction curve.
+                # Only exempt *connected* side roads, and only if the
+                # candidate introduces no new overlap outside a tight
+                # fixed-radius halo around the unchanged shared node.
+                other_owner = clearance.road_owners[other]
+                is_connected = (
+                    owner in clearance.shared_owners.get(_point_key(junction), ())
+                    and other_owner in clearance.shared_owners.get(
+                        _point_key(junction), ()
+                    )
+                    and _point_key(junction) not in clearance.omitted_approaches
+                )
+                if is_connected:
+                    former_ribbon = source.buffer(
+                        width * 0.5 + _ROAD_SHOULDER_CLEARANCE_METRES + 0.25
+                    )
+                    newly_covered = footprint.difference(former_ribbon)
+                    outside_joint = newly_covered.difference(
+                        Point(*junction).buffer(
+                            max(12.0, width + 2.0)
+                        )
+                    )
+                    if not outside_joint.intersects(
+                        clearance.road_shapes[other].buffer(
+                            clearance.road_half_widths[other]
+                        )
+                    ):
+                        continue
                 return None
 
         if neighbor == j + 1:
