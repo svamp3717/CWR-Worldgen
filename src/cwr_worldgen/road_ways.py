@@ -506,6 +506,7 @@ class _BendClearance:
                 new_distance = curve_line.distance(joint)
                 if (
                     owner in self.shared_owners.get(key, ())
+                    and key not in self.omitted_approaches
                     and old_distance < guard
                     and new_distance >= max(0.25, old_distance - 0.25)
                 ):
@@ -557,7 +558,7 @@ class _BendClearance:
                                 curve_line.buffer(_JUNCTION_CLEARANCE_METRES)
                             )
                         )
-                        if connected_nearby:
+                        if connected_nearby and other_owner >= 0:
                             new_area = footprint.difference(
                                 original_path.buffer(
                                     width * 0.5
@@ -682,9 +683,10 @@ def _round_rural_bends(
             # precisely where donor-width roads acquire the visible miter
             # seen in actual .ways exports. The shared node stays fixed,
             # and the full width/overlap safety tests below still apply.
-            connected_leg = (
-                _point_key(a) in clearance.shared
-                or _point_key(c) in clearance.shared
+            connected_leg = any(
+                key in clearance.shared
+                and key not in clearance.omitted_approaches
+                for key in (_point_key(a), _point_key(c))
             )
             if not (
                 (len(run) == 3 and min(before, after) >= 7.0)
