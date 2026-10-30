@@ -191,6 +191,28 @@ The regression test uses translated real coordinates from the provided
 Lundby OSM input and `wg_osmways20.ways` output, including the gravel
 branch that previously blocked the visible bend.
 
+### Short paved bends at real T-junctions (osmways21 diagnostic)
+
+A second captured build (`wg_osmways21.pbo`) and the player console
+position `X=1487.89, Z=3756.14` identified a **27.6° corner** at the
+9.1 m-wide paved road's true T-junction at `X=1573.5, Z=3829.5`.
+It was unchanged from `wg_osmways20`. One paved approach is only
+**14.0 m** long, below the old **18 m** minimum for junction fairing,
+and a gravel branch starts at the junction.
+
+The junction fairer now admits approaches of at least **12 m** (or
+road width plus 2 m, whichever is larger). The junction itself is
+never moved. It can tolerate the **existing** physical overlap between
+the main and side road, with a small intersection halo, but rejects
+any new overlap farther from the junction. The full width, building,
+settlement, bridge and nearby-road checks still apply. This differs
+from simply loosening the general road collision radius.
+
+The regression suite reproduces the actual translated coordinates
+from the uploaded PBO, verifies that the through-road headings become
+tangent-aligned at the original shared node, and tests that placing a
+building at that intersection still blocks the change.
+
 ### Gentle curves on long straight sections
 
 Corner rounding alone leaves long OSM straight lines completely straight.
