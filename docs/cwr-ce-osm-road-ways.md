@@ -213,6 +213,38 @@ from the uploaded PBO, verifies that the through-road headings become
 tangent-aligned at the original shared node, and tests that placing a
 building at that intersection still blocks the change.
 
+### Shared P3D centerline fallback and sharp-turn diagnostics
+
+After the existing native bend, junction and residual-window passes, the
+exporter now tries the **same paved centerline repair solver used by the
+non-ways P3D fitter** on remaining heading changes above 15°. It uses the
+actual native ribbon width and denser sampling, not the smaller radius
+assumed by a different donor. This closes the 15–18° gap and can round
+short legs which the broad rural fillet skips.
+
+For native output, every proposed local change is still checked for
+junction/bridge identity, sampled heading change, source-corridor deviation,
+self-intersection, buildings, water, adjacent roads and map boundaries.
+Vertex removal is limited to small digitizing kinks, never a genuine
+hairpin. Broad native curves and the earlier native passes are retained;
+non-ways behavior is unchanged. The existing terrain grading pipeline is
+not yet changed to consume the final native centerline.
+
+The manifest records:
+
+- `road_ways.shared_fitter_repairs`: accepted compact shared-solver repairs.
+- `road_ways.remaining_sharp_turn_count`: number of reported residual
+  turns over 15°.
+- `road_ways.remaining_sharp_turns`: records with local X/Z metres,
+  angle, surface, width, run index and fallback rejection/protection
+  reason. Unambiguous split-way continuations are included; ambiguous
+  branch turns are not treated as main-road bends.
+
+These diagnostics distinguish an actual remaining geometric corner from
+a smoothing pass that simply made no eligible edits. A reported corner
+is not automatically a bug: protected junctions and clearance constraints
+may make rounding impossible without changing the road network.
+
 ### Gentle curves on long straight sections
 
 Corner rounding alone leaves long OSM straight lines completely straight.

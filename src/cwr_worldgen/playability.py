@@ -1987,8 +1987,15 @@ def _representable_road_run(
     *,
     preserve_start_metres: float = 0.0,
     preserve_end_metres: float = 0.0,
+    paved_half_width: float | None = None,
+    minimum_samples: int = 4,
 ) -> tuple[tuple[float, float], ...]:
     """Repair only paved run geometry that a rigid in-game road cannot follow.
+
+    Native .ways can use the identical centerline solver with their measured
+    ribbon half-width and denser sampling, without needing stock piece models.
+    The native caller separately validates topology, the graded corridor,
+    and every proposed change against obstacle and road clearance.
 
     The run endpoints are immutable because topology/junction discovery has
     already happened. Dirt and gravel retain the historical rounded-run path.
@@ -2006,7 +2013,10 @@ def _representable_road_run(
     if len(cleaned) < 3:
         return tuple(cleaned)
 
-    half_width = _stock_paved_half_width(pieces)
+    half_width = (
+        _stock_paved_half_width(pieces)
+        if paved_half_width is None else paved_half_width
+    )
     if half_width is None:
         return _rounded_road_run(cleaned)
 
@@ -2137,7 +2147,7 @@ def _representable_road_run(
             continue
 
         samples = max(
-            4,
+            4, minimum_samples,
             int(math.ceil(
                 turn / _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES
             )),

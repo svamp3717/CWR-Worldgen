@@ -1593,3 +1593,71 @@ def test_short_junction_fairing_still_respects_neighboring_building(tmp_path):
     assert info["smoothed_junction_through_roads"] == 0
     paved = next(_way_points(nodes, way) for way in ways if way[1] == 9.1)
     assert junction in paved
+
+
+def test_shared_legacy_fitter_rounds_native_17_degree_gap(tmp_path):
+    """Previously no native smoothing pass considered a 15-18 degree bend."""
+    import math
+    from cwr_worldgen.playability import _turn_degrees
+
+    corner = (300, 300)
+    end = (380, 300 + 80 * math.tan(math.radians(17)))
+    road = OsmLineFeature(
+        "way/shallow", {"highway": "primary", "width": "9.1"},
+        tuple(_ll(*p) for p in ((220, 300), corner, end)),
+    )
+    info, nodes, ways, data = _export(tmp_path, [road], world_size=1000)
+    points = _way_points(nodes, ways[0])
+    assert info["shared_fitter_repairs"] == 1
+    assert info["remaining_sharp_turn_count"] == 0
+    assert corner not in points
+    assert points[0] == (220, 300)
+    assert points[-1] == (round(end[0], 4), round(end[1], 4))
+    assert max(_turn_degrees(a, b, c)
+               for a, b, c in zip(points, points[1:], points[2:])) <= 15.0
+    assert _export(tmp_path, [road], world_size=1000)[3] == data
+
+
+def test_shared_fitter_reports_obstacle_rejection_at_original_corner(tmp_path):
+    import math
+
+    corner = (300, 300)
+    end = (380, 300 + 80 * math.tan(math.radians(17)))
+    road = OsmLineFeature(
+        "way/blocked", {"highway": "primary", "width": "9.1"},
+        tuple(_ll(*p) for p in ((220, 300), corner, end)),
+    )
+    building = OsmPolygonFeature(
+        "building/block", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(*p) for p in (
+            (298, 300), (304, 300), (304, 306), (298, 306), (298, 300),
+        ))),),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000, building_polygons=(building,),
+    )
+    assert info["shared_fitter_repairs"] == 0
+    assert corner in _way_points(nodes, ways[0])
+    assert info["remaining_sharp_turn_count"] == 1
+    record = info["remaining_sharp_turns"][0]
+    assert (record["x"], record["z"]) == corner
+    assert record["turn_degrees"] == pytest.approx(17.0, abs=0.01)
+    assert record["reason"] == "building_or_water_clearance"
+
+
+def test_sharp_turn_audit_preserves_and_reports_split_width_transition(tmp_path):
+    roads = [
+        OsmLineFeature("way/first", {"highway": "primary", "width": "6"},
+                       (_ll(200, 300), _ll(300, 300))),
+        OsmLineFeature("way/second", {"highway": "primary", "width": "9.1"},
+                       (_ll(300, 300), _ll(350, 350))),
+    ]
+    info, nodes, ways, _ = _export(tmp_path, roads, world_size=1000)
+    assert len(ways) == 2
+    assert len(set(ways[0][3]).intersection(ways[1][3])) == 1
+    assert info["remaining_sharp_turn_count"] == 1
+    record = info["remaining_sharp_turns"][0]
+    assert (record["x"], record["z"]) == (300, 300)
+    assert record["turn_degrees"] == pytest.approx(45.0)
+    assert record["reason"] == "protected_split_junction"
+    assert "continuation_run_index" in record

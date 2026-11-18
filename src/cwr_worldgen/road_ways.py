@@ -22,6 +22,7 @@ from .playability import (
     _PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES,
     _PAVED_RUN_REPAIR_TANGENT_FRACTION,
     _paved_run_required_tangent,
+    _representable_road_run,
     _turn_degrees,
 )
 from .osm import (
@@ -478,15 +479,31 @@ class _BendClearance:
         *,
         original_path: LineString | None = None,
     ) -> bool:
-        if _point_key(corner) in self.shared:
-            return False
+        return self.rejection_reason(
+            owner, corner, curve, width, original_path=original_path,
+        ) is None
+
+    def rejection_reason(
+        self,
+        owner: int,
+        corner: tuple[float, float],
+        curve: Sequence[tuple[float, float]],
+        width: float,
+        *,
+        original_path: LineString | None = None,
+    ) -> str | None:
+        key = _point_key(corner)
+        if key in self.omitted_approaches:
+            return "protected_bridge_or_tunnel_approach"
+        if key in self.shared:
+            return "protected_shared_junction"
         curve_line = LineString(curve)
         if not curve_line.is_simple:
-            return False
+            return "self_intersection"
         footprint = curve_line.buffer(width * 0.5 + _ROAD_SHOULDER_CLEARANCE_METRES)
         minx, minz, maxx, maxz = footprint.bounds
         if minx < 0 or minz < 0 or maxx >= self.limit or maxz >= self.limit:
-            return False
+            return "map_boundary"
 
         if self.junctions is not None:
             # The P3D fitter leaves the branch node untouched. For native
@@ -514,7 +531,7 @@ class _BendClearance:
                     and new_distance >= max(0.25, old_distance - 0.25)
                 ):
                     continue
-                return False
+                return "junction_clearance"
         if self._intersects(self.settlements, self.settlement_shapes, footprint):
             # Place markers and broad urban polygons are poor proxies for
             # where there is room to curve. Keep true buildings and intersecting
@@ -523,9 +540,9 @@ class _BendClearance:
             if original_path is None or curve_line.hausdorff_distance(
                 original_path
             ) > _SETTLEMENT_BEND_MAX_DEVIATION_METRES:
-                return False
+                return "settlement_corridor"
         if self._intersects(self.obstacles, self.obstacle_shapes, footprint):
-            return False
+            return "building_or_water_clearance"
         if self.roads is not None:
             # Query wide enough for the engine's maximum 50 m road width.
             nearby = curve_line.buffer(width * 0.5 + 28.0)
@@ -574,8 +591,8 @@ class _BendClearance:
                                 )
                             ):
                                 continue
-                    return False
-        return True
+                    return "nearby_road_clearance"
+        return None
 
 
 def _repair_short_p3d_kinks(
@@ -1434,6 +1451,194 @@ def _fair_through_junctions(
     return working, smoothed, touched
 
 
+def _repair_residual_with_shared_fitter(
+    run: Sequence[tuple[float, float]],
+    *,
+    owner: int,
+    width: float,
+    clearance: _BendClearance,
+    original_reference: Sequence[tuple[float, float]],
+) -> tuple[list[tuple[float, float]], int, dict[tuple[float, float], str]]:
+    """Reuse the legacy paved centerline solver for unresolved native corners.
+
+    Broad native curves remain preferable where they fit. This compact
+    fallback also handles the 15-18 degree gap and short legs excluded by
+    the native rural-bend heuristics. It never moves shared nodes or bridge
+    seams. Unlike the P3D fitter, native ribbons must remain inside the
+    existing graded source corridor and pass explicit clearance checks.
+    """
+    result = list(run)
+    if len(result) < 3:
+        return result, 0, {}
+    source = LineString(original_reference)
+    changed = 0
+    rejected: dict[tuple[float, float], str] = {}
+    i = 1
+    while i < len(result) - 1:
+        a, b, c = result[i-1:i+2]
+        turn = _turn_degrees(a, b, c)
+        if turn <= _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES + 1e-6:
+            i += 1
+            continue
+
+        key = _point_key(b)
+        reason = None
+        if key in clearance.omitted_approaches:
+            reason = "protected_bridge_or_tunnel_approach"
+        elif key in clearance.shared:
+            reason = "protected_shared_junction"
+        else:
+            local = [
+                (round(x, _COORD_DECIMALS), round(z, _COORD_DECIMALS))
+                for x, z in _representable_road_run(
+                    (a, b, c), (), paved_half_width=width * 0.5,
+                    minimum_samples=12,
+                )
+            ]
+            local = [p for j, p in enumerate(local) if j == 0 or p != local[j-1]]
+            if len(local) < 2 or local[0] != a or local[-1] != c:
+                reason = "insufficient_tangent_space"
+            elif local == [a, b, c]:
+                reason = "insufficient_tangent_space"
+            else:
+                # The shared fitter may delete an impossible vertex. Only
+                # accept a tiny digitization defect, not a real hairpin.
+                if len(local) == 2:
+                    shortcut = LineString(local)
+                    if (
+                        turn > 95.0
+                        or min(math.dist(a, b), math.dist(b, c)) > _MAX_P3D_KINK_LEG_METRES
+                        or shortcut.distance(Point(*b))
+                        > min(_MAX_P3D_KINK_DISPLACEMENT_METRES, max(2.0, width * 0.65))
+                    ):
+                        reason = "insufficient_tangent_space"
+                    changed_path = local
+                    old_path = LineString((a, b, c))
+                else:
+                    changed_path = local[1:-1]
+                    old_path = LineString((changed_path[0], b, changed_path[-1]))
+                if reason is None:
+                    # Check the actual splice as well as the sampled curve:
+                    # removing a kink must not simply move it to a neighbour.
+                    before = result[max(0, i-2):i-1]
+                    after = result[i+2:i+3]
+                    limit = _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES
+                    internal_angles = (
+                        _turn_degrees(x, y, z)
+                        for x, y, z in zip(local, local[1:], local[2:])
+                    )
+                    # Adjacent existing sharp vertices need their own
+                    # repair, but this change must not make them worse.
+                    # In particular, do not block a compact fillet just
+                    # because the next original corner is also sharp.
+                    bad_join = (
+                        bool(before) and
+                        _turn_degrees(before[0], a, local[1])
+                        > max(limit, _turn_degrees(before[0], a, b)) + 1e-4
+                    ) or (
+                        bool(after) and
+                        _turn_degrees(local[-2], c, after[0])
+                        > max(limit, _turn_degrees(b, c, after[0])) + 1e-4
+                    )
+                    if len(changed_path) < 2 or bad_join or any(
+                        angle > limit + 1e-6 for angle in internal_angles
+                    ):
+                        reason = "residual_heading_change"
+                    else:
+                        reason = clearance.rejection_reason(
+                            owner, b, changed_path, width, original_path=old_path,
+                        )
+                if reason is None:
+                    candidate = result[:i-1] + local + result[i+2:]
+                    candidate_line = LineString(candidate)
+                    if not candidate_line.is_simple:
+                        reason = "self_intersection"
+                    elif candidate_line.hausdorff_distance(source) > _MAX_CORRIDOR_DEVIATION_METRES:
+                        reason = "source_corridor"
+                    else:
+                        result = candidate
+                        changed += 1
+                        i += len(local) - 2
+                        # Revisit the next original vertex (or the new join).
+                        i = max(1, i)
+                        continue
+        rejected[b] = reason or "unresolved"
+        i += 1
+    return result, changed, rejected
+
+
+def _audit_remaining_sharp_turns(
+    runs: Sequence[_RoadRun],
+    clearance: _BendClearance,
+    rejections: Sequence[Mapping[tuple[float, float], str]],
+) -> list[dict[str, object]]:
+    """Report residual heading changes, including unambiguous split ways.
+
+    A branch turn is not a through-road bend. For split ways, only report
+    a unique compatible continuation (or a degree-two material transition).
+    Do not invent a main road at ambiguous multi-arm junctions.
+    """
+    limit = _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES
+    records = []
+    ends = defaultdict(list)
+
+    def add(index, point, angle, reason, *, other_index=None):
+        _, tags, width, _ = runs[index]
+        record = {
+            "run_index": index,
+            "x": point[0], "z": point[1],
+            "turn_degrees": round(angle, 3),
+            "width_metres": round(width, 3),
+            "surface": _surface(tags),
+            "reason": reason,
+        }
+        if other_index is not None:
+            record["continuation_run_index"] = other_index
+        records.append(record)
+
+    for index, (_, tags, width, points) in enumerate(runs):
+        for a, b, c in zip(points, points[1:], points[2:]):
+            angle = _turn_degrees(a, b, c)
+            if angle > limit + 1e-6:
+                key = _point_key(b)
+                reason = rejections[index].get(b)
+                if key in clearance.omitted_approaches:
+                    reason = "protected_bridge_or_tunnel_approach"
+                elif key in clearance.shared:
+                    reason = "protected_shared_junction"
+                add(index, b, angle, reason or "unresolved_after_smoothing")
+        for point, neighbour in ((points[0], points[1]), (points[-1], points[-2])):
+            if _point_key(point) in clearance.shared:
+                ends[point].append((index, neighbour, _surface(tags), round(width, 3)))
+
+    for joint, arms in sorted(ends.items()):
+        if not 2 <= len(arms) <= 5:
+            continue
+        choices = []
+        for i, a in enumerate(arms):
+            for b in arms[i+1:]:
+                if a[0] == b[0]:
+                    continue
+                if len(arms) > 2 and a[2:] != b[2:]:
+                    continue
+                angle = _turn_degrees(a[1], joint, b[1])
+                choices.append((angle, a[0], b[0]))
+        choices.sort()
+        if not choices or (
+            len(choices) > 1 and choices[1][0] - choices[0][0] < 12.0
+        ):
+            continue
+        angle, first, second = choices[0]
+        if angle > limit + 1e-6 and (len(arms) == 2 or angle <= 95.0):
+            reason = (
+                "protected_bridge_or_tunnel_approach"
+                if _point_key(joint) in clearance.omitted_approaches
+                else "protected_split_junction"
+            )
+            add(first, joint, angle, reason, other_index=second)
+    return records
+
+
 def write_osm_road_ways(
     path: Path,
     dataset: OsmDataset,
@@ -1559,6 +1764,8 @@ def write_osm_road_ways(
     repaired_rural_kinks = 0
     softened_rural_straights = 0
     eased_residual_turns = 0
+    shared_fitter_repairs = 0
+    residual_rejections = []
     prepared_runs = []
     for run_index, (owner, tags, width, original) in enumerate(source_runs):
         repaired_run, repaired = _repair_short_p3d_kinks(
@@ -1581,10 +1788,19 @@ def write_osm_road_ways(
             run, owner=owner, width=width, clearance=clearance,
             original_reference=original_source_runs[run_index][3],
         )
+        run, shared_repairs, rejected = _repair_residual_with_shared_fitter(
+            run, owner=owner, width=width, clearance=clearance,
+            original_reference=original_source_runs[run_index][3],
+        )
+        shared_fitter_repairs += shared_repairs
+        residual_rejections.append(rejected)
         smoothed_bends += rounded
         softened_rural_straights += softened
         eased_residual_turns += eased
         prepared_runs.append((owner, tags, width, run))
+    residual_turns = _audit_remaining_sharp_turns(
+        prepared_runs, clearance, residual_rejections,
+    )
     for owner, tags, width, run in prepared_runs:
         for index in range(0, len(run) - 1, _MAX_NODES_PER_WAY - 1):
             chunk = run[index:index + _MAX_NODES_PER_WAY]
@@ -1636,6 +1852,9 @@ def write_osm_road_ways(
         "stock_bridge_modules": len(stock_bridge_axes),
         "smoothed_rural_bends": smoothed_bends,
         "eased_residual_turns": eased_residual_turns,
+        "shared_fitter_repairs": shared_fitter_repairs,
+        "remaining_sharp_turn_count": len(residual_turns),
+        "remaining_sharp_turns": residual_turns,
         "smoothed_junction_through_roads": smoothed_junctions,
         "repaired_rural_kinks": repaired_rural_kinks,
         "softened_rural_straights": softened_rural_straights,
