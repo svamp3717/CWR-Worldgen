@@ -1017,7 +1017,12 @@ def _ease_remaining_turns(
                     (after.y - exit.y) / out_length,
                 )
                 chord = entry.distance(exit)
-                if chord < max(width * 1.5, 5.0):
+                # A quarter-circle with radius 0.65 * width + 1 m can
+                # have a chord shorter than 1.5 * width. For wide paved
+                # donors, use the actual sampled radius and ribbon
+                # clearance rather than rejecting such curves up front.
+                minimum_chord = max(width * (1.0 if paved_priority else 1.5), 5.0)
+                if chord < minimum_chord:
                     continue
                 # Unequal handles let the spline borrow length from the
                 # long approach without consuming the end of the short one.
