@@ -245,6 +245,29 @@ a smoothing pass that simply made no eligible edits. A reported corner
 is not automatically a bug: protected junctions and clearance constraints
 may make rounding impossible without changing the road network.
 
+### Paved-road priority for difficult bends
+
+Paved ways receive an additional corridor-fairing pass before the shared
+compact P3D fallback. Instead of being limited to symmetric 12–32 m
+windows, it searches approaches up to **48–96 m on each side**, scaled
+by the actual exported ribbon width, and tries unequal approach lengths.
+For example, a 10 m approach followed by a long straight can be rounded
+without moving the endpoint or requiring 12 m on both sides.
+
+The extra pass is surface-specific, not a change to gravel/dirt roads.
+It uses the same effective width as the exported way: OSM/normalized width
+with **Keep donor road width** off, or the measured donor width with the
+option on. Each candidate must satisfy the width-aware minimum radius
+(maximum of 5 m and 0.65 × width + 1 m), a 15° sampled heading limit
+including both splice joins, and the existing building, water, neighboring
+road, settlement and graded-corridor constraints. Shared graph points
+and bridge/tunnel approaches are immutable. Unsafe curves still remain
+unchanged and appear in the existing sharp-turn diagnostics.
+
+`road_ways.paved_corridor_repairs` counts accepted additional paved-road
+fairings separately from the standard residual-window and shared-fitter
+passes. Terrain grading remains based on the original source corridor.
+
 ### Gentle curves on long straight sections
 
 Corner rounding alone leaves long OSM straight lines completely straight.

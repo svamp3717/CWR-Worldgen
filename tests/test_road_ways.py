@@ -1661,3 +1661,94 @@ def test_sharp_turn_audit_preserves_and_reports_split_width_transition(tmp_path)
     assert record["turn_degrees"] == pytest.approx(45.0)
     assert record["reason"] == "protected_split_junction"
     assert "continuation_run_index" in record
+
+
+@pytest.mark.parametrize("donor_width", [None, 9.1, 12.0])
+def test_paved_priority_rounds_short_asymmetric_approach(tmp_path, donor_width):
+    """A ten-metre approach cannot fit the old symmetric 12m+ window."""
+    from shapely.geometry import LineString
+    from cwr_worldgen.playability import _turn_degrees
+
+    source = [(200, 300), (210, 300), (210, 420)]
+    road = OsmLineFeature(
+        "way/asymmetric", {"highway": "primary"},
+        tuple(_ll(*p) for p in source),
+    )
+    kwargs = {} if donor_width is None else {
+        "surface_widths": {"paved": donor_width},
+        "require_donor_widths": True,
+    }
+    info, nodes, ways, data = _export(
+        tmp_path, [road], world_size=1000, **kwargs,
+    )
+    points = _way_points(nodes, ways[0])
+    assert ways[0][1] == (9.0 if donor_width is None else donor_width)
+    assert info["paved_corridor_repairs"] >= 1
+    assert info["remaining_sharp_turn_count"] == 0
+    assert points[0] == source[0] and points[-1] == source[-1]
+    assert source[1] not in points
+    assert max(_turn_degrees(a, b, c)
+               for a, b, c in zip(points, points[1:], points[2:])) <= 15.0
+    line = LineString(points)
+    assert line.is_simple
+    assert line.hausdorff_distance(LineString(source)) <= 14.01
+    assert _export(tmp_path, [road], world_size=1000, **kwargs)[3] == data
+
+
+@pytest.mark.parametrize("donor_width", [None, 12.0])
+def test_paved_priority_does_not_bypass_building_clearance(tmp_path, donor_width):
+    road = OsmLineFeature(
+        "way/asymmetric", {"highway": "primary"},
+        (_ll(200, 300), _ll(210, 300), _ll(210, 420)),
+    )
+    building = OsmPolygonFeature(
+        "building/block", {"building": "yes"},
+        (GeoPolygon(tuple(_ll(*p) for p in (
+            (201, 301), (214, 301), (214, 314), (201, 314), (201, 301),
+        ))),),
+    )
+    kwargs = {} if donor_width is None else {
+        "surface_widths": {"paved": donor_width},
+        "require_donor_widths": True,
+    }
+    info, nodes, ways, _ = _export(
+        tmp_path, [road], world_size=1000, building_polygons=(building,), **kwargs,
+    )
+    assert info["paved_corridor_repairs"] == 0
+    assert (210, 300) in _way_points(nodes, ways[0])
+    assert info["remaining_sharp_turn_count"] >= 1
+
+
+def test_paved_priority_does_not_change_gravel_or_shared_node(tmp_path):
+    gravel = OsmLineFeature(
+        "way/gravel", {"highway": "primary", "surface": "gravel", "width": "9"},
+        (_ll(200, 300), _ll(210, 300), _ll(210, 420)),
+    )
+    info, _, _, _ = _export(tmp_path, [gravel], world_size=1000)
+    assert info["paved_corridor_repairs"] == 0
+
+    paved = OsmLineFeature(
+        "way/main", {"highway": "primary"},
+        (_ll(200, 300), _ll(210, 300), _ll(210, 420)),
+    )
+    branch = OsmLineFeature(
+        "way/branch", {"highway": "service", "surface": "gravel"},
+        (_ll(210, 300), _ll(260, 300)),
+    )
+    info, nodes, ways, _ = _export(
+        tmp_path, [paved, branch], world_size=1000,
+    )
+    assert info["paved_corridor_repairs"] == 0
+    assert sum((210, 300) in _way_points(nodes, way) for way in ways) == 2
+
+
+def test_paved_priority_windows_scale_with_effective_width():
+    from cwr_worldgen.road_ways import _paved_fair_windows
+
+    default = _paved_fair_windows(200.0, 0.0, 400.0, 9.0)
+    donor = _paved_fair_windows(200.0, 0.0, 400.0, 12.0)
+    assert donor[0][1] - donor[0][0] > default[0][1] - default[0][0] > 64
+    near_endpoint = _paved_fair_windows(10.0, 0.0, 120.0, 12.0)
+    assert all(0 < start < 10 < stop < 120
+               for start, stop, _, _ in near_endpoint)
+    assert any(stop - 10 > 32 for start, stop, _, _ in near_endpoint)

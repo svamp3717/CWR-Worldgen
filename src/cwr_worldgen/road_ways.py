@@ -7,6 +7,7 @@ shared integer node IDs, and a texture or optional P3D material donor.
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from collections import defaultdict
 import hashlib
 from pathlib import Path
@@ -160,6 +161,13 @@ _BEND_ISOLATED_LEG_SHARE = 0.62
 _RESIDUAL_BEND_WINDOW_METRES = (32.0, 24.0, 17.0, 12.0)
 _RESIDUAL_BEND_MIN_ANGLE_DEGREES = 19.0
 _RESIDUAL_BEND_MAX_DEVIATION_METRES = 10.0
+# Paved ribbons need more tangent space than narrow tracks. Retry residual
+# bends over a width-scaled corridor, without relaxing obstacle/grade limits.
+_PAVED_FAIR_MIN_ANGLE_DEGREES = 18.0
+_PAVED_FAIR_MIN_REACH_METRES = 48.0
+_PAVED_FAIR_MAX_REACH_METRES = 96.0
+_PAVED_FAIR_ENDPOINT_MARGIN_METRES = 0.25
+_PAVED_FAIR_MIN_SIDE_METRES = 5.0
 _BEND_SAMPLE_SPACING_METRES = 1.8
 _MAX_CORRIDOR_DEVIATION_METRES = 14.0
 # The P3D fitter already identifies tight corners that cannot fit a physical
@@ -863,6 +871,41 @@ def _round_rural_bends(
 
 
 
+def _paved_fair_windows(
+    position: float, left_bound: float, right_bound: float, width: float,
+) -> list[tuple[float, float, float, float]]:
+    """Longest feasible windows first, including short/long approach pairs.
+
+    Bounds are run endpoints or immutable graph/bridge nodes. Keep the
+    interpolation strictly on this side of them. Corridor and curvature
+    validation still decides whether any proposed window is safe.
+    """
+    left_max = position - left_bound - _PAVED_FAIR_ENDPOINT_MARGIN_METRES
+    right_max = right_bound - position - _PAVED_FAIR_ENDPOINT_MARGIN_METRES
+    if min(left_max, right_max) < _PAVED_FAIR_MIN_SIDE_METRES:
+        return []
+    reach = max(_PAVED_FAIR_MIN_REACH_METRES,
+                min(_PAVED_FAIR_MAX_REACH_METRES, width * 7.0))
+    reaches = sorted({reach, reach * 0.8, reach * 0.6, 40.0, 32.0,
+                      24.0, 17.0, 12.0, 9.0, 6.0}, reverse=True)
+    pairs = set()
+    for length in reaches:
+        for left_ratio, right_ratio in ((1.0, 1.0), (1.0, 0.5), (0.5, 1.0)):
+            left = min(left_max, length * left_ratio)
+            right = min(right_max, length * right_ratio)
+            if min(left, right) >= _PAVED_FAIR_MIN_SIDE_METRES:
+                pairs.add((left, right))
+    # When one approach is short, a compact, balanced fillet may be the
+    # only safe solution. Do not force a long asymmetric curve.
+    equal = min(left_max, right_max, reach)
+    pairs.add((equal, equal))
+    return [
+        (position - left, position + right, factor, factor)
+        for left, right in sorted(pairs, key=lambda p: (-sum(p), -min(p), -p[0]))
+        for factor in (0.55, 0.70)
+    ]
+
+
 def _ease_remaining_turns(
     run: Sequence[tuple[float, float]],
     *,
@@ -870,8 +913,13 @@ def _ease_remaining_turns(
     width: float,
     clearance: _BendClearance,
     original_reference: Sequence[tuple[float, float]] | None = None,
+    paved_priority: bool = False,
 ) -> tuple[list[tuple[float, float]], int]:
     """Fair residual short OSM zigzags that single-corner arcs cannot fit.
+
+    Paved priority searches a longer width-scaled window and allows unequal
+    approaches. It uses the emitted width (OSM/default or measured donor)
+    and retains the same source-corridor and obstacle protections.
 
     The P3D road generator repairs compact sequences of corners rather than
     forcing a rigid piece onto every original vertex. Use a similar *window*
@@ -895,6 +943,14 @@ def _ease_remaining_turns(
         for p, q in zip(result, result[1:]):
             distances.append(distances[-1] + math.dist(p, q))
         total = distances[-1]
+        protected_distances = [0.0]
+        if paved_priority:
+            protected_distances.extend(
+                d for p, d in zip(result[1:-1], distances[1:-1])
+                if _point_key(p) in clearance.shared
+                or _point_key(p) in clearance.omitted_approaches
+            )
+        protected_distances.append(total)
         accepted = False
         for i in range(1, len(result) - 1):
             corner = result[i]
@@ -902,11 +958,27 @@ def _ease_remaining_turns(
             if key in clearance.shared or key in clearance.omitted_approaches:
                 continue
             angle = _turn_degrees(result[i-1], corner, result[i+1])
-            if not _RESIDUAL_BEND_MIN_ANGLE_DEGREES <= angle <= _MAX_BEND_DEGREES:
+            minimum_angle = (
+                _PAVED_FAIR_MIN_ANGLE_DEGREES if paved_priority
+                else _RESIDUAL_BEND_MIN_ANGLE_DEGREES
+            )
+            if not minimum_angle <= angle <= _MAX_BEND_DEGREES:
                 continue
-            for reach in _RESIDUAL_BEND_WINDOW_METRES:
-                start = distances[i] - reach
-                stop = distances[i] + reach
+            position = distances[i]
+            if paved_priority:
+                # The corner itself is not protected (checked above).
+                # Find the closest immutable anchor on either side.
+                bound = bisect_right(protected_distances, position)
+                windows = _paved_fair_windows(
+                    position, protected_distances[bound - 1],
+                    protected_distances[bound], width,
+                )
+            else:
+                windows = [
+                    (position - reach, position + reach, 0.70, 0.70)
+                    for reach in _RESIDUAL_BEND_WINDOW_METRES
+                ]
+            for start, stop, in_factor, out_factor in windows:
                 if start <= 0 or stop >= total:
                     continue
                 # Protect all graph nodes, including an interior node that a
@@ -947,12 +1019,17 @@ def _ease_remaining_turns(
                 chord = entry.distance(exit)
                 if chord < max(width * 1.5, 5.0):
                     continue
-                handle = min(reach * 0.7, chord * 0.46)
+                # Unequal handles let the spline borrow length from the
+                # long approach without consuming the end of the short one.
+                cap = chord * (0.65 if paved_priority else 0.46)
+                in_handle = min((position - start) * in_factor, cap)
+                out_handle = min((stop - position) * out_factor, cap)
                 p0 = (entry.x, entry.y)
                 p3 = (exit.x, exit.y)
-                p1 = (p0[0] + handle*incoming[0], p0[1] + handle*incoming[1])
-                p2 = (p3[0] - handle*outgoing[0], p3[1] - handle*outgoing[1])
-                samples = max(10, math.ceil(2*reach / _BEND_SAMPLE_SPACING_METRES))
+                p1 = (p0[0] + in_handle*incoming[0], p0[1] + in_handle*incoming[1])
+                p2 = (p3[0] - out_handle*outgoing[0], p3[1] - out_handle*outgoing[1])
+                spacing = 1.4 if paved_priority else _BEND_SAMPLE_SPACING_METRES
+                samples = max(10, math.ceil((stop - start) / spacing))
                 arc: list[tuple[float, float]] = []
                 for k in range(samples + 1):
                     t = k / samples
@@ -984,6 +1061,7 @@ def _ease_remaining_turns(
                 # wide roadway inside a tight S-bend.
                 minimum_radius = max(
                     _MIN_CURVE_RADIUS_METRES,
+                    width * 0.65 + 1.0 if paved_priority else
                     width * 0.5 + _PAVED_RUN_REPAIR_RADIUS_MARGIN_METRES,
                 )
                 good = True
@@ -1007,6 +1085,17 @@ def _ease_remaining_turns(
                     continue
                 prefix = list(substring(path, 0, start).coords)
                 suffix = list(substring(path, stop, total).coords)
+                if paved_priority:
+                    # Validate both joins on the actual emitted polyline.
+                    # A rounded interior is useless if it moves the sharp
+                    # turn to the beginning or end of the window.
+                    if (
+                        _turn_degrees(prefix[-2], arc[0], arc[1])
+                        > _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES
+                        or _turn_degrees(arc[-2], arc[-1], suffix[1])
+                        > _PAVED_RUN_REPAIR_MAXIMUM_LOCAL_TURN_DEGREES
+                    ):
+                        continue
                 candidate = [
                     *prefix[:-1], *arc, *suffix[1:],
                 ]
@@ -1765,6 +1854,7 @@ def write_osm_road_ways(
     softened_rural_straights = 0
     eased_residual_turns = 0
     shared_fitter_repairs = 0
+    paved_corridor_repairs = 0
     residual_rejections = []
     prepared_runs = []
     for run_index, (owner, tags, width, original) in enumerate(source_runs):
@@ -1788,6 +1878,16 @@ def write_osm_road_ways(
             run, owner=owner, width=width, clearance=clearance,
             original_reference=original_source_runs[run_index][3],
         )
+        # Preserve the existing compact fairer and gravel/dirt appearance.
+        # Paved ribbons get a second chance to distribute a residual turn
+        # across a longer stretch before the small shared-fitter fallback.
+        if _surface(tags) == "paved":
+            run, paved_faired = _ease_remaining_turns(
+                run, owner=owner, width=width, clearance=clearance,
+                original_reference=original_source_runs[run_index][3],
+                paved_priority=True,
+            )
+            paved_corridor_repairs += paved_faired
         run, shared_repairs, rejected = _repair_residual_with_shared_fitter(
             run, owner=owner, width=width, clearance=clearance,
             original_reference=original_source_runs[run_index][3],
@@ -1853,6 +1953,7 @@ def write_osm_road_ways(
         "smoothed_rural_bends": smoothed_bends,
         "eased_residual_turns": eased_residual_turns,
         "shared_fitter_repairs": shared_fitter_repairs,
+        "paved_corridor_repairs": paved_corridor_repairs,
         "remaining_sharp_turn_count": len(residual_turns),
         "remaining_sharp_turns": residual_turns,
         "smoothed_junction_through_roads": smoothed_junctions,
