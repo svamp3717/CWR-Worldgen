@@ -133,8 +133,7 @@ def test_world_pbo_contains_native_ways_and_enforces_layout(tmp_path):
         )
 
 
-def test_ways_reject_engine_way_limit_before_writing(tmp_path):
-    # The engine limits ways to 10,000 even if the file is below 8 MiB.
+def test_ways_export_more_than_old_engine_way_limit(tmp_path):
     many_roads = [
         OsmLineFeature(
             f"way/{i:05d}", {"highway": "residential"},
@@ -142,8 +141,39 @@ def test_ways_reject_engine_way_limit_before_writing(tmp_path):
         )
         for i in range(10_001)
     ]
-    with pytest.raises(ValueError, match="10,000 ways"):
-        _export(tmp_path, many_roads)
+    info, nodes, ways, _ = _export(tmp_path, many_roads)
+    assert info["ways"] == len(ways) == 10_001
+    assert info["nodes"] == len(nodes) == 2
+
+
+def test_ways_export_more_than_old_engine_node_limit(tmp_path):
+    # Separate straight primary roads avoid both cosmetic S-curves and
+    # expensive corner searches; all source vertices must survive export.
+    roads = [
+        OsmLineFeature(
+            f"way/{i:03d}", {"highway": "primary"},
+            tuple(_ll(100 + j, 20 + 3 * i) for j in range(401)),
+        )
+        for i in range(250)
+    ]
+    info, nodes, ways, data = _export(tmp_path, roads, world_size=1000)
+    assert info["nodes"] == len(nodes) == 100_250
+    assert info["ways"] == len(ways) == 250
+    assert all(len(way[3]) == 401 for way in ways)
+    assert len(data) < 64 * 1024 * 1024
+
+
+def test_ways_preserve_file_size_safeguard(tmp_path, monkeypatch):
+    import cwr_worldgen.road_ways as road_ways
+
+    monkeypatch.setattr(road_ways, "_MAX_BYTES", 100)
+    road = OsmLineFeature(
+        "way/large", {"highway": "primary"},
+        (_ll(10, 10), _ll(20, 10)),
+    )
+    with pytest.raises(ValueError, match="file-size safeguard"):
+        _export(tmp_path, [road], world_size=1000)
+    assert not (tmp_path / "test_world.ways").exists()
 
 
 

@@ -395,10 +395,13 @@ profile and require the isolated CWR-CE engine branch or a build containing it.
   coordinates. Paths that nearly meet but have distinct vertices are not
   artificially connected. For complicated crossings, inspect the resulting
   network in game.
-- The CWR-CE implementation limits files to 8 MiB, 100,000 nodes, 10,000 ways,
-  200,000 lines, and 8,192 bytes per line. Worldgen splits long ways and rejects
-  output exceeding remaining engine limits rather than writing an unreadable
-  file.
+- Recent CWR-CE isolated engine builds and Worldgen accept sidecars up to
+  64 MiB without fixed aggregate node, way or line-count limits. Worldgen
+  still chunks ways to at most 512 node references and checks the 8,192-byte
+  line limit. Engine terrain sampling and mesh safety limits remain.
+  **Update both Worldgen and the isolated CWR-CE engine** before using maps
+  above the previous 100,000-node, 10,000-way, 200,000-line or 8 MiB caps.
+  Large worlds may still require significant memory and loading time.
 - Road modelling is still performed for terrain-fitting and clearance purposes.
   This profile changes final road **serialization**, not the entire planner.
 - The default CWA 1.99 game cannot read the ways sidecar; use **cwa** or **cwr-ce** for

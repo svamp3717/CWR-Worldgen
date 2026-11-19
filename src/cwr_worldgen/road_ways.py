@@ -36,10 +36,9 @@ from .osm import (
     road_width_metres,
 )
 
-# Hard limits in CWR-CE RoadNet::ReadWayDefinitions / LoadWays.
-_MAX_NODES = 100_000
-_MAX_WAYS = 10_000
-_MAX_BYTES = 8 * 1024 * 1024
+# CWR-CE RoadNet::LoadWays bounds aggregate input by size, not record
+# counts. Keep this budget synchronized with the isolated engine branch.
+_MAX_BYTES = 64 * 1024 * 1024
 _MAX_LINE = 8192
 _MAX_NODES_PER_WAY = 512  # comfortably below the engine's 4096-node limit
 _COORD_DECIMALS = 4
@@ -1915,17 +1914,7 @@ def write_osm_road_ways(
             for point in chunk:
                 if point not in nodes:
                     nodes[point] = len(nodes) + 1
-                    if len(nodes) > _MAX_NODES:
-                        raise ValueError(
-                            "CWR-CE .ways supports at most 100,000 nodes; "
-                            "reduce the generated area or road detail"
-                        )
                 ids.append(nodes[point])
-            if len(lines) >= _MAX_WAYS:
-                raise ValueError(
-                    "CWR-CE .ways supports at most 10,000 ways; "
-                    "reduce the generated area or road detail"
-                )
             lines.append(
                 f"way {len(lines) + 1} {width:.3f} {sources[_surface(tags)]} "
                 + " ".join(map(str, ids))
@@ -1939,12 +1928,14 @@ def write_osm_road_ways(
         "# CWR-CE native OSM-style roads; local terrain X/Z in metres\n"
         + "\n".join(node_lines + lines) + "\n"
     ).encode("utf-8")
-    if len(content) > _MAX_BYTES or any(
-        len(line.encode("utf-8")) > _MAX_LINE for line in node_lines + lines
-    ):
+    if len(content) > _MAX_BYTES:
         raise ValueError(
-            "CWR-CE .ways size/line limit exceeded; reduce road detail or map area"
+            "CWR-CE .ways exceeds the 64 MiB file-size safeguard; "
+            "reduce road detail or map area"
         )
+    if any(len(line.encode("utf-8")) > _MAX_LINE
+           for line in node_lines + lines):
+        raise ValueError("CWR-CE .ways exceeds the 8,192-byte line limit")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return {
