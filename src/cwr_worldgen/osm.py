@@ -3720,6 +3720,58 @@ def _square_elevation_samples(
     return tuple(values)
 
 
+def _stock_square_plane_offset(
+    elevations: Sequence[float], cells: int, cell_size: float,
+    x: float, z: float, size: float, *,
+    centre_height: float, gradient_x: float, gradient_z: float,
+    maximum_burial: float, maximum_float: float,
+) -> float | None:
+    """Fit a terrain-sheared stock square to the actual ground, not total relief.
+
+    Smooth hills can rise much more than the square relief threshold without
+    floating a stock tree proxy: the model's terrain shear follows the plane.
+    Sample terrain-grid intersections and both possible triangle diagonals to
+    reject curved or broken terrain instead. A small vertical correction is
+    allowed only within the existing burial/float limits.
+    """
+    half = size * 0.5
+    limit = cells * cell_size - 0.001
+    if x - half < 0.0 or z - half < 0.0 or x + half > limit or z + half > limit:
+        return None
+    xs = sorted(set(
+        _terrain_axis_breakpoints(x - half, x + half, cells, cell_size)
+        + _terrain_patch_centres(x - half, x + half, cells, cell_size)
+        + (x,)
+    ))
+    zs = sorted(set(
+        _terrain_axis_breakpoints(z - half, z + half, cells, cell_size)
+        + _terrain_patch_centres(z - half, z + half, cells, cell_size)
+        + (z,)
+    ))
+    minimum_residual = float("inf")
+    maximum_residual = float("-inf")
+    for sample_x in xs:
+        for sample_z in zs:
+            lower, upper = _triangle_elevation_bounds(
+                elevations, cells, cell_size, sample_x, sample_z,
+            )
+            plane = (
+                centre_height
+                + gradient_x * (sample_x - x)
+                + gradient_z * (sample_z - z)
+            )
+            minimum_residual = min(minimum_residual, lower - plane)
+            maximum_residual = max(maximum_residual, upper - plane)
+            if maximum_residual - minimum_residual > maximum_burial + maximum_float + 1e-6:
+                return None
+    minimum_offset = maximum_residual - maximum_burial
+    maximum_offset = minimum_residual + maximum_float
+    if minimum_offset > maximum_offset + 1e-6:
+        return None
+    # Keep the stock origin on its original plane when it already fits.
+    return max(minimum_offset, min(0.0, maximum_offset))
+
+
 def _non_buried_vegetation_anchor(
     supports: Sequence[float], *, clearance: float
 ) -> float:
@@ -9814,25 +9866,42 @@ def generate_world_objects(
                 # vertical origin and an upright, terrain-sheared transform.
                 # A generic WorldObject at ground Y buries the entire model.
                 # Keep the normal terrain-fit ladder for custom P3Ds.
-                if everon_stock_forest and relief <= maximum_allowed_relief:
+                if everon_stock_forest:
                     stock_gradient_x, stock_gradient_z = _local_terrain_gradient(
                         elevations, spec.cells, spec.cell_size, x, z,
                     )
                     if math.hypot(stock_gradient_x, stock_gradient_z) <= EVERON_FOREST_MAXIMUM_SHEAR:
-                        stock_y = centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES
-                        emit(
-                            TerrainShearedWorldObject(
-                                next_id, spec.forest_tree_model,
-                                x, stock_y, z, heading, 0.0,
-                                terrain_shear_x=stock_gradient_x,
-                                terrain_shear_z=stock_gradient_z,
+                        # Keep the original relief-based acceptance, but give
+                        # smooth hillsides a second chance using the shear plane.
+                        plane_offset = (
+                            0.0 if relief <= maximum_allowed_relief
+                            else _stock_square_plane_offset(
+                                elevations, spec.cells, spec.cell_size, x, z, spacing,
+                                centre_height=centre_height,
+                                gradient_x=stock_gradient_x,
+                                gradient_z=stock_gradient_z,
+                                maximum_burial=block_maximum_burial,
+                                maximum_float=block_maximum_float,
                             )
                         )
-                        next_id += 1
-                        forest_count += 1
-                        forest_block_objects += 1
-                        mark_accepted_forest(x, z, spacing * 0.58)
-                        continue
+                        if plane_offset is not None:
+                            stock_y = (
+                                centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES
+                                + plane_offset
+                            )
+                            emit(
+                                TerrainShearedWorldObject(
+                                    next_id, spec.forest_tree_model,
+                                    x, stock_y, z, heading, 0.0,
+                                    terrain_shear_x=stock_gradient_x,
+                                    terrain_shear_z=stock_gradient_z,
+                                )
+                            )
+                            next_id += 1
+                            forest_count += 1
+                            forest_block_objects += 1
+                            mark_accepted_forest(x, z, spacing * 0.58)
+                            continue
 
                 if not low_anchor and not everon_stock_forest:
                     support_height = maximum_height
