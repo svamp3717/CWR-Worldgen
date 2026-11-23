@@ -2200,7 +2200,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         self.assertEqual(moderate.forest_block_objects, 4)
         self.assertEqual(moderate.forest_everon_steep_objects, 0)
         self.assertEqual(moderate.forest_cluster_objects, 0)
-        self.assertTrue(all(obj.model_path == spec.forest_everon_steep_model for obj in moderate.objects))
+        self.assertTrue(all(obj.model_path == spec.forest_tree_model for obj in moderate.objects))
 
         steep_heights = tuple(float(x * 8) for _z in range(4) for x in range(4))
         steep = generate_world_objects(
@@ -2268,8 +2268,8 @@ class RoadPieceFittingTests(unittest.TestCase):
             dataset, projection, raster, slope_elevations,
             spec, include_roads=False,
         )
-        self.assertEqual(hillside.forest_block_objects, 2)
-        self.assertEqual(hillside.forest_everon_steep_objects, 2)
+        self.assertEqual(hillside.forest_block_objects, 4)
+        self.assertEqual(hillside.forest_everon_steep_objects, 0)
         for obj in hillside.objects:
             self.assertIsInstance(obj, TerrainShearedWorldObject)
             sample = _sample_elevation(
