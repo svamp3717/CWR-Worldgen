@@ -3736,16 +3736,16 @@ def _stock_square_plane_offset(
     """
     half = size * 0.5
     limit = cells * cell_size - 0.001
-    if x - half < 0.0 or z - half < 0.0 or x + half > limit or z + half > limit:
-        return None
+    minimum_x, maximum_x = max(0.0, x - half), min(limit, x + half)
+    minimum_z, maximum_z = max(0.0, z - half), min(limit, z + half)
     xs = sorted(set(
-        _terrain_axis_breakpoints(x - half, x + half, cells, cell_size)
-        + _terrain_patch_centres(x - half, x + half, cells, cell_size)
+        _terrain_axis_breakpoints(minimum_x, maximum_x, cells, cell_size)
+        + _terrain_patch_centres(minimum_x, maximum_x, cells, cell_size)
         + (x,)
     ))
     zs = sorted(set(
-        _terrain_axis_breakpoints(z - half, z + half, cells, cell_size)
-        + _terrain_patch_centres(z - half, z + half, cells, cell_size)
+        _terrain_axis_breakpoints(minimum_z, maximum_z, cells, cell_size)
+        + _terrain_patch_centres(minimum_z, maximum_z, cells, cell_size)
         + (z,)
     ))
     minimum_residual = float("inf")
