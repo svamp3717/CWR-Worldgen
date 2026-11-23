@@ -2275,9 +2275,16 @@ class RoadPieceFittingTests(unittest.TestCase):
             sample = _sample_elevation(
                 slope_elevations, spec.cells, spec.cell_size, obj.x, obj.z
             )
-            self.assertAlmostEqual(
-                obj.y - sample, EVERON_FOREST_ORIGIN_LIFT_METRES,
-                places=5,
+            # Plane fitting may shift the origin slightly to keep all
+            # embedded tree bases within the configured float/burial limits.
+            actual_lift = obj.y - sample
+            self.assertGreaterEqual(
+                actual_lift,
+                EVERON_FOREST_ORIGIN_LIFT_METRES - spec.forest_block_maximum_burial - 1e-6,
+            )
+            self.assertLessEqual(
+                actual_lift,
+                EVERON_FOREST_ORIGIN_LIFT_METRES + spec.forest_block_maximum_float + 1e-6,
             )
             self.assertGreater(abs(obj.terrain_shear_x), 0.01)
 
@@ -2458,10 +2465,10 @@ class RoadPieceFittingTests(unittest.TestCase):
         result = generate_world_objects(
             dataset, projection, raster, rolling_heights, spec, include_roads=False
         )
-        # Stock squares should survive on genuinely smooth portions of the
-        # slope; the finite terrain edge still needs smaller fallback models.
-        self.assertEqual(result.forest_block_objects, 2)
-        self.assertEqual(result.forest_everon_steep_objects, 2)
+        # The smooth slope is now supported by terrain-sheared squares,
+        # including where the total relief exceeds the original threshold.
+        self.assertEqual(result.forest_block_objects, 4)
+        self.assertEqual(result.forest_everon_steep_objects, 0)
         self.assertEqual(result.forest_sunk_polygon_objects, 0)
         self.assertLessEqual(result.maximum_forest_burial, spec.forest_block_maximum_burial + 1e-6)
         self.assertLessEqual(result.maximum_forest_float, spec.forest_block_maximum_float + 1e-6)
