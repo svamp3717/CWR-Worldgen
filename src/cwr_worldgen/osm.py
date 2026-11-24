@@ -20,6 +20,7 @@ from .cache import CACHE_SCHEMA_VERSION, atomic_write_bytes, cache_key, streamin
 from .building_semantics import is_actual_church
 from .fence_openings import fence_opening_chunk_indices
 from .model import OsmSpec, TerrainShearedWorldObject, WorldObject
+from .stock_forest_roots import EVERON_T1_ROOTS, EVERON_TRIANGLE_ROOTS
 from .network import (
     OVERPASS_RATE_LIMIT_BACKOFF_SECONDS,
     OVERPASS_REFERER,
@@ -3069,6 +3070,8 @@ def _edge_ground_elevation_samples(
     end: PointXZ,
     x_breakpoints: Sequence[float],
     z_breakpoints: Sequence[float],
+    *,
+    sample_bounds: Callable[[Sequence[float], int, float, float, float], tuple[float, float]] = _triangle_elevation_bounds,
 ) -> tuple[float, ...]:
     dx = end[0] - start[0]
     dz = end[1] - start[1]
@@ -3113,7 +3116,7 @@ def _edge_ground_elevation_samples(
     return tuple(
         bound
         for parameter in parameters
-        for bound in _triangle_elevation_bounds(
+        for bound in sample_bounds(
             elevations,
             cells,
             cell_size,
@@ -3128,6 +3131,8 @@ def _polygon_ground_elevation_samples(
     cells: int,
     cell_size: float,
     polygon: Sequence[PointXZ],
+    *,
+    sample_bounds: Callable[[Sequence[float], int, float, float, float], tuple[float, float]] = _triangle_elevation_bounds,
 ) -> tuple[float, ...]:
     """Sample every arrangement vertex needed for exact triangle extrema."""
 
@@ -3163,7 +3168,7 @@ def _polygon_ground_elevation_samples(
     values = [
         bound
         for x, z in points
-        for bound in _triangle_elevation_bounds(
+        for bound in sample_bounds(
             elevations, cells, cell_size, x, z
         )
     ]
@@ -3177,6 +3182,7 @@ def _polygon_ground_elevation_samples(
                 end,
                 x_breakpoints,
                 z_breakpoints,
+                sample_bounds=sample_bounds,
             )
         )
     return tuple(values)
@@ -3718,6 +3724,164 @@ def _square_elevation_samples(
             )
         )
     return tuple(values)
+
+
+def _stock_square_plane_fit(
+    elevations: Sequence[float], cells: int, cell_size: float,
+    x: float, z: float, size: float, *,
+    centre_height: float, gradient_x: float, gradient_z: float,
+    maximum_burial: float,
+) -> tuple[float, float, float] | None:
+    """Fit the stock square's nominal root plane with zero positive float.
+
+    A smooth slope is not in itself a reason to reject a terrain-sheared
+    forest. Curvature, steps and saddles are: both possible RVW4 triangle
+    surfaces must fit within the burial budget, without lifting roots off
+    the lower surface. This is a nominal footprint check, not a measurement
+    of the actual embedded stock P3D tree geometry.
+    """
+    half = size * 0.5
+    limit = cells * cell_size - 0.001
+    minimum_x, maximum_x = max(0.0, x - half), min(limit, x + half)
+    minimum_z, maximum_z = max(0.0, z - half), min(limit, z + half)
+    grid_x = _terrain_axis_breakpoints(minimum_x, maximum_x, cells, cell_size)
+    grid_z = _terrain_axis_breakpoints(minimum_z, maximum_z, cells, cell_size)
+    # Grid intersections (including the footprint corners) and intersections
+    # of either implicit diagonal with the footprint boundary give the extrema
+    # of the piecewise-planar terrain minus the model's world-space plane.
+    points = {(sx, sz) for sx in grid_x for sz in grid_z}
+    points.add((x, z))
+    for sx in (minimum_x, maximum_x):
+        patch_x = int(math.floor(sx / cell_size))
+        if patch_x >= cells - 1:
+            continue
+        fraction = sx - patch_x * cell_size
+        for lo, hi in zip(grid_z, grid_z[1:]):
+            patch_z = int(math.floor((lo + hi) * 0.5 / cell_size))
+            if patch_z >= cells - 1:
+                continue
+            for dz in (fraction, cell_size - fraction):
+                sz = patch_z * cell_size + dz
+                if lo < sz < hi:
+                    points.add((sx, sz))
+    for sz in (minimum_z, maximum_z):
+        patch_z = int(math.floor(sz / cell_size))
+        if patch_z >= cells - 1:
+            continue
+        fraction = sz - patch_z * cell_size
+        for lo, hi in zip(grid_x, grid_x[1:]):
+            patch_x = int(math.floor((lo + hi) * 0.5 / cell_size))
+            if patch_x >= cells - 1:
+                continue
+            for dx in (fraction, cell_size - fraction):
+                sx = patch_x * cell_size + dx
+                if lo < sx < hi:
+                    points.add((sx, sz))
+    minimum_residual = float("inf")
+    maximum_residual = float("-inf")
+    for sample_x, sample_z in points:
+        lower, upper = _triangle_elevation_bounds(
+            elevations, cells, cell_size, sample_x, sample_z,
+        )
+        plane = (
+            centre_height
+            + gradient_x * (sample_x - x)
+            + gradient_z * (sample_z - z)
+        )
+        minimum_residual = min(minimum_residual, lower - plane)
+        maximum_residual = max(maximum_residual, upper - plane)
+        if maximum_residual - minimum_residual > maximum_burial + 1e-6:
+            return None
+    # Use the highest non-floating plane. A small downward adjustment is
+    # preferable to airborne roots, but never exceed the burial budget.
+    offset = min(0.0, minimum_residual)
+    burial = max(0.0, maximum_residual - offset)
+    if burial > maximum_burial + 1e-6:
+        return None
+    return offset, burial, 0.0
+
+
+def _stock_triangle_plane_fit(
+    elevations: Sequence[float], cells: int, cell_size: float,
+    x: float, z: float, footprint: float, heading: float, *,
+    centre_height: float, gradient_x: float, gradient_z: float,
+    maximum_burial: float,
+) -> tuple[float, float, float] | None:
+    """Fit the stock triangle's nominal root plane with zero positive float.
+
+    Use the same rotated rectangular support envelope as the existing
+    triangle relief check. At every terrain arrangement vertex, including
+    boundary crossings of both RVW4 diagonals, subtract the world-space
+    shear plane before measuring the grounding error. This is conservative
+    for the nominal footprint, not a per-proxy calibration of the P3D.
+    """
+    polygon = _oriented_rectangle(x, z, footprint * 0.58, footprint, heading)
+
+    def residual_bounds(
+        heights: Sequence[float], count: int, step: float,
+        sample_x: float, sample_z: float,
+    ) -> tuple[float, float]:
+        lower, upper = _triangle_elevation_bounds(
+            heights, count, step, sample_x, sample_z,
+        )
+        plane = (
+            centre_height
+            + gradient_x * (sample_x - x)
+            + gradient_z * (sample_z - z)
+        )
+        return lower - plane, upper - plane
+
+    residuals = _polygon_ground_elevation_samples(
+        elevations, cells, cell_size, polygon, sample_bounds=residual_bounds,
+    ) + residual_bounds(elevations, cells, cell_size, x, z)
+    offset = min(0.0, min(residuals))
+    burial = max(0.0, max(residuals) - offset)
+    if burial > maximum_burial + 1e-6:
+        return None
+    return offset, burial, 0.0
+
+
+def _stock_forest_root_fit(
+    elevations: Sequence[float], cells: int, cell_size: float,
+    x: float, z: float, heading: float,
+    roots: Sequence[tuple[float, float, float]], *,
+    centre_height: float, gradient_x: float, gradient_z: float,
+    maximum_burial: float, maximum_plane_relief: float | None = None,
+) -> tuple[float, float, float] | None:
+    """Ground measured stock forest root samples with the actual WRP transform.
+
+    Return (origin Y, maximum burial, maximum float). Keep the nominal
+    stock origin as an upper bound and lower it just enough that every
+    measured root is below both possible terrain surfaces. A 3 cm margin
+    allows for the 5 cm RVW4 height quantization and millimetre calibration.
+    The square's relief limit applies to terrain deviation from its shear
+    plane, independently of the model's own varying root heights.
+    """
+    angle = math.radians(heading)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    minimum_anchor = float("-inf")
+    maximum_anchor = centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES
+    minimum_residual, maximum_residual = 0.0, 0.0
+    for local_x, local_y, local_z in roots:
+        dx = cosine * local_x + sine * local_z
+        dz = -sine * local_x + cosine * local_z
+        shear = gradient_x * dx + gradient_z * dz
+        lower, upper = _triangle_elevation_bounds(
+            elevations, cells, cell_size, x + dx, z + dz,
+        )
+        minimum_residual = min(minimum_residual, lower - centre_height - shear)
+        maximum_residual = max(maximum_residual, upper - centre_height - shear)
+        if (
+            maximum_plane_relief is not None
+            and maximum_residual - minimum_residual > maximum_plane_relief + 1e-6
+        ):
+            return None
+        relative_y = local_y + shear
+        minimum_anchor = max(minimum_anchor, upper - relative_y)
+        maximum_anchor = min(maximum_anchor, lower - relative_y - 0.03)
+        if minimum_anchor - maximum_anchor > maximum_burial + 1e-6:
+            return None
+    return maximum_anchor, max(0.0, minimum_anchor - maximum_anchor), 0.0
 
 
 def _non_buried_vegetation_anchor(
@@ -9814,25 +9978,39 @@ def generate_world_objects(
                 # vertical origin and an upright, terrain-sheared transform.
                 # A generic WorldObject at ground Y buries the entire model.
                 # Keep the normal terrain-fit ladder for custom P3Ds.
-                if everon_stock_forest and relief <= maximum_allowed_relief:
+                if everon_stock_forest:
                     stock_gradient_x, stock_gradient_z = _local_terrain_gradient(
                         elevations, spec.cells, spec.cell_size, x, z,
                     )
                     if math.hypot(stock_gradient_x, stock_gradient_z) <= EVERON_FOREST_MAXIMUM_SHEAR:
-                        stock_y = centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES
-                        emit(
-                            TerrainShearedWorldObject(
-                                next_id, spec.forest_tree_model,
-                                x, stock_y, z, heading, 0.0,
-                                terrain_shear_x=stock_gradient_x,
-                                terrain_shear_z=stock_gradient_z,
-                            )
+                        # Ground the actual measured model-local tree bases,
+                        # not an assumed square or uniformly flat root plane.
+                        root_fit = _stock_forest_root_fit(
+                            elevations, spec.cells, spec.cell_size,
+                            x, z, heading, EVERON_T1_ROOTS,
+                            centre_height=centre_height,
+                            gradient_x=stock_gradient_x,
+                            gradient_z=stock_gradient_z,
+                            maximum_burial=block_maximum_burial,
+                            maximum_plane_relief=maximum_allowed_relief,
                         )
-                        next_id += 1
-                        forest_count += 1
-                        forest_block_objects += 1
-                        mark_accepted_forest(x, z, spacing * 0.58)
-                        continue
+                        if root_fit is not None:
+                            stock_y, burial, floating = root_fit
+                            emit(
+                                TerrainShearedWorldObject(
+                                    next_id, spec.forest_tree_model,
+                                    x, stock_y, z, heading, 0.0,
+                                    terrain_shear_x=stock_gradient_x,
+                                    terrain_shear_z=stock_gradient_z,
+                                )
+                            )
+                            next_id += 1
+                            forest_count += 1
+                            forest_block_objects += 1
+                            mark_accepted_forest(x, z, spacing * 0.58)
+                            maximum_forest_burial = max(maximum_forest_burial, burial)
+                            maximum_forest_float = max(maximum_forest_float, floating)
+                            continue
 
                 if not low_anchor and not everon_stock_forest:
                     support_height = maximum_height
@@ -9927,34 +10105,36 @@ def generate_world_objects(
                         and everon_steep_model.replace("/", "\\").casefold()
                         == KOLGUJEV_FOREST_TRIANGLE_MODEL.casefold()
                     )
-                    steep_fit = (
-                        (
-                            _sample_elevation(
-                                elevations, spec.cells, spec.cell_size, x, z
-                            ) + EVERON_FOREST_ORIGIN_LIFT_METRES,
-                            0.0, 0.0,
-                        )
-                        if stock_everon_triangle
-                        else _terrain_fit_anchor(
-                            steep_supports,
-                            clearance=spec.forest_ground_clearance,
-                            maximum_burial=everon_steep_maximum_burial,
-                            maximum_float=everon_steep_maximum_float,
-                        )
-                    ) if (
+                    steep_fit = None
+                    if (
                         everon_steep_model
                         and not triangle_blocked_by_road
                         and steep_relief <= everon_steep_maximum_relief
-                        and (
-                            not stock_everon_triangle
-                            or math.hypot(gradient_x, gradient_z)
-                            <= EVERON_FOREST_MAXIMUM_SHEAR
-                        )
-                    ) else None
+                    ):
+                        if stock_everon_triangle:
+                            if math.hypot(gradient_x, gradient_z) <= EVERON_FOREST_MAXIMUM_SHEAR:
+                                # The stock triangle's measured root extent
+                                # is nearly 50 m, not the nominal 35 m envelope.
+                                steep_fit = _stock_forest_root_fit(
+                                    elevations, spec.cells, spec.cell_size,
+                                    x, z, heading, EVERON_TRIANGLE_ROOTS,
+                                    centre_height=centre_height,
+                                    gradient_x=gradient_x,
+                                    gradient_z=gradient_z,
+                                    maximum_burial=everon_steep_maximum_burial,
+                                )
+                        else:
+                            steep_fit = _terrain_fit_anchor(
+                                steep_supports,
+                                clearance=spec.forest_ground_clearance,
+                                maximum_burial=everon_steep_maximum_burial,
+                                maximum_float=everon_steep_maximum_float,
+                            )
                     if steep_fit is not None:
                         base_anchor, burial, floating = steep_fit
-                        # The stock P3D has its OWN lifted origin and upright
-                        # proxy trunks; do not apply generic polygon sinking.
+                        # Stock forest trunks are model geometry, not proxies.
+                        # The measured root fit includes their lifted origin;
+                        # do not apply generic polygon sinking on top of it.
                         sink_depth = (
                             steep_relief * polygon_sink_fraction
                             if (

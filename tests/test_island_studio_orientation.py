@@ -131,7 +131,11 @@ def test_editor_overlays_follow_same_north_up_terrain_view(
              (call.args[1] + call.args[3]) / 2)
             for call in markers
         )
-        assert centres == pytest.approx([(50, 50), (150, 350)])
+        assert len(centres) == 2
+        assert all(
+            actual == pytest.approx(expected)
+            for actual, expected in zip(centres, ((50, 50), (150, 350)))
+        )
 
 
 def test_road_overlay_uses_p3d_outline_before_straight_line_fallback(

@@ -73,6 +73,8 @@ KOLGUJEV_BUSH_MODELS: tuple[str, ...] = (
 KOLGUJEV_HILLSIDE_TREE_MODEL = r"data3d\str smrk ridky.p3d"
 # Resistance/Nogova vegetation from O.pbo. Keep the leaf and pine families
 # explicit so neither named preset silently falls back to Data3D trees.
+NOGOVA_LEAF_FOREST_STEEP_MODEL = r"o\tree\les_nw_trojuhelnik.p3d"
+NOGOVA_PINE_FOREST_STEEP_MODEL = r"o\tree\les_nw_jehl_trojuhelnik.p3d"
 NOGOVA_LEAF_SINGLE_TREE_MODEL = r"o\tree\Javor01.p3d"
 NOGOVA_LEAF_ROADSIDE_TREE_MODEL = r"o\tree\Javor02.p3d"
 NOGOVA_LEAF_ROADSIDE_TREE_MODELS: tuple[str, ...] = (
@@ -188,8 +190,19 @@ def _resolved_forest_profile_models(spec: "Milestone9Spec") -> dict[str, object]
         roadside = NOGOVA_PINE_ROADSIDE_TREE_MODEL if nogova_pine else NOGOVA_LEAF_ROADSIDE_TREE_MODEL
         roadside_models = NOGOVA_PINE_ROADSIDE_TREE_MODELS if nogova_pine else NOGOVA_LEAF_ROADSIDE_TREE_MODELS
         hillside = NOGOVA_PINE_HILLSIDE_TREE_MODEL if nogova_pine else NOGOVA_LEAF_HILLSIDE_TREE_MODEL
+        # The GUI supplies the matching triangle explicitly, but CLI and API
+        # callers may select only the Nogova primary block and leave the
+        # inherited Data3D fallback at its default. Resolve that default to
+        # the same Resistance family, without replacing custom model paths.
+        steep = NOGOVA_PINE_FOREST_STEEP_MODEL if nogova_pine else NOGOVA_LEAF_FOREST_STEEP_MODEL
         return {
             "forest_tree_model": forest_tree_model,
+            "forest_everon_steep_model": (
+                steep
+                if str(spec.forest_everon_steep_model).replace("/", "\\").casefold()
+                == KOLGUJEV_FOREST_STEEP_MODEL.casefold()
+                else spec.forest_everon_steep_model
+            ),
             "forest_single_tree_model": single if spec.forest_single_tree_model == EVERON_SINGLE_TREE_MODEL else spec.forest_single_tree_model,
             "forest_roadside_tree_model": roadside if spec.forest_roadside_tree_model == EVERON_ROADSIDE_TREE_MODEL else spec.forest_roadside_tree_model,
             "forest_roadside_tree_models": roadside_models if spec.forest_roadside_tree_models == ROADSIDE_TREE_MODELS else spec.forest_roadside_tree_models,

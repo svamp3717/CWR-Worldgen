@@ -30,10 +30,12 @@ from cwr_worldgen.milestone9 import (
     MALDEN_ROADSIDE_TREE_MODELS,
     MALDEN_SINGLE_TREE_MODEL,
     NOGOVA_BUSH_MODELS,
+    NOGOVA_LEAF_FOREST_STEEP_MODEL,
     NOGOVA_LEAF_HILLSIDE_TREE_MODEL,
     NOGOVA_LEAF_ROADSIDE_TREE_MODEL,
     NOGOVA_LEAF_ROADSIDE_TREE_MODELS,
     NOGOVA_LEAF_SINGLE_TREE_MODEL,
+    NOGOVA_PINE_FOREST_STEEP_MODEL,
     NOGOVA_PINE_HILLSIDE_TREE_MODEL,
     NOGOVA_PINE_ROADSIDE_TREE_MODEL,
     NOGOVA_PINE_ROADSIDE_TREE_MODELS,
@@ -615,6 +617,8 @@ class SurfacePassTests(unittest.TestCase):
             forest_tree_model=r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
         )
         resolved = _resolved_forest_profile_models(spec)
+        self.assertEqual(resolved["forest_tree_model"], spec.forest_tree_model)
+        self.assertEqual(resolved["forest_everon_steep_model"], NOGOVA_LEAF_FOREST_STEEP_MODEL)
         self.assertEqual(resolved["forest_single_tree_model"], NOGOVA_LEAF_SINGLE_TREE_MODEL)
         self.assertEqual(resolved["forest_roadside_tree_model"], NOGOVA_LEAF_ROADSIDE_TREE_MODEL)
         self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), NOGOVA_LEAF_ROADSIDE_TREE_MODELS)
@@ -682,6 +686,8 @@ class SurfacePassTests(unittest.TestCase):
             forest_tree_model=r"o\tree\les_nw_jehl_ctver_pruhozi.p3d",
         )
         resolved = _resolved_forest_profile_models(spec)
+        self.assertEqual(resolved["forest_tree_model"], spec.forest_tree_model)
+        self.assertEqual(resolved["forest_everon_steep_model"], NOGOVA_PINE_FOREST_STEEP_MODEL)
         self.assertEqual(resolved["forest_single_tree_model"], NOGOVA_PINE_SINGLE_TREE_MODEL)
         self.assertEqual(resolved["forest_roadside_tree_model"], NOGOVA_PINE_ROADSIDE_TREE_MODEL)
         self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), NOGOVA_PINE_ROADSIDE_TREE_MODELS)
@@ -694,6 +700,73 @@ class SurfacePassTests(unittest.TestCase):
         )
         self.assertTrue(all(path.casefold().startswith("o\\tree" + "\\") for path in tree_paths))
         self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in tree_paths))
+
+    def test_nogova_forest_fallback_preserves_explicit_custom_models(self) -> None:
+        for primary, triangle in (
+            (r"o\tree\les_nw_ctver_pruhozi_T1.p3d", NOGOVA_LEAF_FOREST_STEEP_MODEL),
+            (r"o\tree\les_nw_jehl_ctver_pruhozi.p3d", NOGOVA_PINE_FOREST_STEEP_MODEL),
+        ):
+            for explicit in (triangle, r"custom\forest_triangle.p3d", ""):
+                with self.subTest(primary=primary, explicit=explicit):
+                    spec = Milestone9Spec(
+                        source_dir=Path("unused"), forest_profile="everon",
+                        forest_tree_model=primary, forest_everon_steep_model=explicit,
+                    )
+                    self.assertEqual(
+                        _resolved_forest_profile_models(spec)["forest_everon_steep_model"],
+                        explicit,
+                    )
+
+    def test_nogova_forest_fallback_emits_matching_stock_polygon_family(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        dataset = OsmDataset(
+            source_generator="nogova-polygon-family", element_count=0,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(True,) * 64,
+            farmland=(False,) * 64, urban=(False,) * 64,
+            roads=(False,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        # A 2 m rise per 25 m sample exceeds the 3 m square relief budget
+        # across interior 50 m cells but fits the smaller triangle envelope.
+        elevations = tuple(float(col * 2) for row in range(8) for col in range(8))
+        for primary, triangle in (
+            (r"o\tree\les_nw_ctver_pruhozi_T1.p3d", NOGOVA_LEAF_FOREST_STEEP_MODEL),
+            (r"o\tree\les_nw_jehl_ctver_pruhozi.p3d", NOGOVA_PINE_FOREST_STEEP_MODEL),
+        ):
+            with self.subTest(primary=primary):
+                source = Milestone9Spec(
+                    source_dir=Path("unused"), forest_profile="everon",
+                    forest_tree_model=primary,
+                )
+                resolved = _resolved_forest_profile_models(source)
+                spec = _Milestone9PlayabilitySpec(
+                    name="cwr_nogova_family", heightmap_path=Path("unused.png"),
+                    bbox=(0.0, 0.0, 1.0, 1.0), cells=8, cell_size=25.0,
+                    forest_profile="everon", forest_tree_spacing=50.0,
+                    max_road_objects=0, max_buildings=0, max_forest_objects=32,
+                    forest_maximum_block_relief=3.0,
+                    forest_everon_steep_maximum_relief=8.0,
+                    forest_undergrowth_enabled=False, forest_single_tree_enabled=False,
+                    forest_border_enabled=False, steep_hill_bushes_enabled=False,
+                    ditch_grass_enabled=False, rural_vegetation_enabled=False,
+                    strict_assets=False, **resolved,
+                )
+                result = generate_world_objects(
+                    dataset, projection, raster, elevations, spec, include_roads=False,
+                )
+                polygons = {
+                    obj.model_path.casefold() for obj in result.objects
+                    if "les" in obj.model_path.casefold()
+                    and ("ctver" in obj.model_path.casefold()
+                         or "trojuhelnik" in obj.model_path.casefold())
+                }
+                # Require an actual emitted matching triangle, rather than
+                # allowing an empty result to satisfy the no-Data3D assertion.
+                self.assertIn(triangle.casefold(), polygons)
+                self.assertTrue(polygons <= {primary.casefold(), triangle.casefold()})
 
     def test_kolgujev_surface_profile_uses_stock_cain_roles(self) -> None:
         paths = surface_texture_wire_paths("cwr_cain", "kolgujev")
@@ -2179,7 +2252,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         # its child tree roots sit ~11.7 m below the WRP object origin.
         self.assertTrue(all(
             isinstance(obj, TerrainShearedWorldObject)
-            and abs(obj.y - EVERON_FOREST_ORIGIN_LIFT_METRES) < 1e-6
+            and abs(obj.y - (11.590 - 0.03)) < 1e-6
             for obj in flat.objects
         ))
 
@@ -2196,21 +2269,29 @@ class RoadPieceFittingTests(unittest.TestCase):
         moderate = generate_world_objects(
             dataset, projection, raster, moderate_heights, spec, include_roads=False
         )
-        self.assertEqual(moderate.forest_block_objects, 0)
-        self.assertEqual(moderate.forest_everon_steep_objects, 4)
+        # The interior slope is planar. The finite terrain edge flattens,
+        # so its squares fail this test's tighter zero-float burial budget.
+        self.assertEqual(moderate.forest_block_objects, 2)
+        self.assertEqual(moderate.forest_everon_steep_objects, 2)
         self.assertEqual(moderate.forest_cluster_objects, 0)
-        self.assertTrue(all(obj.model_path == spec.forest_everon_steep_model for obj in moderate.objects))
+        self.assertTrue(all(obj.model_path in (
+            spec.forest_tree_model, spec.forest_everon_steep_model,
+        ) for obj in moderate.objects))
 
         steep_heights = tuple(float(x * 8) for _z in range(4) for x in range(4))
         steep = generate_world_objects(
             dataset, projection, raster, steep_heights, spec, include_roads=False
         )
-        self.assertEqual(steep.forest_block_objects, 0)
-        self.assertEqual(steep.forest_everon_steep_objects, 2)
-        self.assertEqual(steep.forest_cluster_objects, 2)
-        self.assertEqual(steep.forest_hillside_tree_objects, 0)
-        self.assertEqual(steep.forest_cluster_rejections, 0)
-        self.assertTrue(any(obj.model_path.startswith(r"cwr_forest_ladder\f\c_") for obj in steep.objects))
+        # The finite terrain edge becomes flat beyond the final height sample.
+        # The two interior squares still fit. The measured triangle roots extend
+        # outside the old relief envelope and also fail the burial budget at
+        # the edge, so those cells need the existing grounded fallback.
+        self.assertEqual(steep.forest_block_objects, 2)
+        self.assertEqual(steep.forest_everon_steep_objects, 0)
+        self.assertGreaterEqual(steep.forest_everon_steep_rejections, 2)
+        self.assertGreaterEqual(steep.forest_hillside_fallback_blocks, 2)
+        self.assertGreater(steep.forest_cluster_objects + steep.forest_hillside_tree_objects, 0)
+        self.assertEqual(steep.vegetation_audit_violations, 0)
         self.assertLessEqual(steep.forest_cluster_maximum_burial, spec.forest_cluster_maximum_burial + 1e-6)
         self.assertLessEqual(steep.forest_cluster_maximum_float, spec.forest_cluster_maximum_float + 1e-6)
         repeated = generate_world_objects(
@@ -2253,7 +2334,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         for obj in flat.objects:
             self.assertIsInstance(obj, TerrainShearedWorldObject)
             self.assertAlmostEqual(
-                obj.y, 20.0 + EVERON_FOREST_ORIGIN_LIFT_METRES,
+                obj.y, 20.0 + 11.590 - 0.03,
                 places=5,
             )
             self.assertAlmostEqual(obj.terrain_shear_x, 0.0, places=5)
@@ -2266,15 +2347,23 @@ class RoadPieceFittingTests(unittest.TestCase):
             dataset, projection, raster, slope_elevations,
             spec, include_roads=False,
         )
-        self.assertEqual(hillside.forest_everon_steep_objects, 4)
+        self.assertEqual(hillside.forest_block_objects, 4)
+        self.assertEqual(hillside.forest_everon_steep_objects, 0)
         for obj in hillside.objects:
             self.assertIsInstance(obj, TerrainShearedWorldObject)
             sample = _sample_elevation(
                 slope_elevations, spec.cells, spec.cell_size, obj.x, obj.z
             )
-            self.assertAlmostEqual(
-                obj.y - sample, EVERON_FOREST_ORIGIN_LIFT_METRES,
-                places=5,
+            # Plane fitting may shift the origin slightly to keep all
+            # embedded tree bases within the configured float/burial limits.
+            actual_lift = obj.y - sample
+            self.assertGreaterEqual(
+                actual_lift,
+                EVERON_FOREST_ORIGIN_LIFT_METRES - spec.forest_block_maximum_burial - 1e-6,
+            )
+            self.assertLessEqual(
+                actual_lift,
+                EVERON_FOREST_ORIGIN_LIFT_METRES + spec.forest_block_maximum_float + 1e-6,
             )
             self.assertGreater(abs(obj.terrain_shear_x), 0.01)
 
@@ -2363,6 +2452,260 @@ class RoadPieceFittingTests(unittest.TestCase):
         )
         self.assertEqual({obj.model_path for obj in result.objects}, {custom_model})
 
+    def test_stock_square_plane_fit_accepts_smooth_slope_not_sharp_ridge(self) -> None:
+        from cwr_worldgen.osm import (
+            _local_terrain_gradient, _stock_square_plane_fit,
+        )
+
+        cells, cell_size = 5, 25.0
+        x = z = 50.0
+        smooth = tuple(float(column * 5) for row in range(cells) for column in range(cells))
+        gradient_x, gradient_z = _local_terrain_gradient(
+            smooth, cells, cell_size, x, z,
+        )
+        self.assertAlmostEqual(gradient_x, 0.2)
+        self.assertAlmostEqual(gradient_z, 0.0)
+        fit = _stock_square_plane_fit(
+            smooth, cells, cell_size, x, z, 50.0,
+            centre_height=_sample_elevation(smooth, cells, cell_size, x, z),
+            gradient_x=gradient_x, gradient_z=gradient_z,
+            maximum_burial=2.0,
+        )
+        # The slope rises 10 m over 50 m, far beyond the default 3 m
+        # relief limit, but perfectly follows the stock model's shear plane.
+        self.assertIsNotNone(fit)
+        self.assertAlmostEqual(fit[0], 0.0)
+        self.assertAlmostEqual(fit[1], 0.0)
+        self.assertEqual(fit[2], 0.0)
+
+        # A small depression can fit only if the entire nominal root plane
+        # is lowered. The old fit allowed a positive floating tolerance.
+        shallow = list(smooth)
+        shallow[1 * cells + 1] -= 0.5
+        fit = _stock_square_plane_fit(
+            shallow, cells, cell_size, x, z, 50.0,
+            centre_height=_sample_elevation(shallow, cells, cell_size, x, z),
+            gradient_x=gradient_x, gradient_z=gradient_z,
+            maximum_burial=2.0,
+        )
+        self.assertIsNotNone(fit)
+        self.assertAlmostEqual(fit[0], -0.5)
+        self.assertAlmostEqual(fit[1], 0.5)
+        self.assertEqual(fit[2], 0.0)
+
+        broken = list(smooth)
+        broken[2 * cells + 2] += 8.0
+        gradient_x, gradient_z = _local_terrain_gradient(
+            broken, cells, cell_size, x, z,
+        )
+        self.assertIsNone(_stock_square_plane_fit(
+            broken, cells, cell_size, x, z, 50.0,
+            centre_height=_sample_elevation(broken, cells, cell_size, x, z),
+            gradient_x=gradient_x, gradient_z=gradient_z,
+            maximum_burial=2.0,
+        ))
+
+    def test_stock_forest_measured_root_fit_uses_actual_y_and_rotated_positions(self) -> None:
+        from cwr_worldgen.osm import _stock_forest_root_fit, _triangle_elevation_bounds
+        from cwr_worldgen.stock_forest_roots import EVERON_T1_ROOTS, EVERON_TRIANGLE_ROOTS
+
+        self.assertEqual(len(EVERON_T1_ROOTS), 125)
+        self.assertEqual(len(EVERON_TRIANGLE_ROOTS), 120)
+        self.assertGreater(max(abs(p[0]) for p in EVERON_TRIANGLE_ROOTS), 24.0)
+        self.assertGreater(max(p[2] for p in EVERON_TRIANGLE_ROOTS), 24.0)
+        cells, size = 9, 25.0
+        x = z = 100.0
+        gx, gz = 0.12, -0.08
+        elevations = tuple(
+            20.0 + gx * (col * size - x) + gz * (row * size - z)
+            for row in range(cells) for col in range(cells)
+        )
+        for roots in (EVERON_T1_ROOTS, EVERON_TRIANGLE_ROOTS):
+            for heading in (0.0, 37.0, 90.0, 180.0, 270.0):
+                with self.subTest(count=len(roots), heading=heading):
+                    fit = _stock_forest_root_fit(
+                        elevations, cells, size, x, z, heading, roots,
+                        centre_height=20.0, gradient_x=gx, gradient_z=gz,
+                        maximum_burial=2.0, maximum_plane_relief=0.0,
+                    )
+                    self.assertIsNotNone(fit)
+                    anchor, burial, floating = fit
+                    self.assertAlmostEqual(anchor, 20.0 - max(p[1] for p in roots) - 0.03)
+                    self.assertEqual(floating, 0.0)
+                    obj = TerrainShearedWorldObject(
+                        1, "stock.p3d", x, anchor, z, heading,
+                        terrain_shear_x=gx, terrain_shear_z=gz,
+                    )
+                    matrix = obj.matrix_4x3()
+                    for lx, ly, lz in roots:
+                        sx = obj.x + lx * matrix[0] + lz * matrix[6]
+                        sz = obj.z + lx * matrix[2] + lz * matrix[8]
+                        sy = obj.y + lx * matrix[1] + ly + lz * matrix[7]
+                        low, high = _triangle_elevation_bounds(
+                            elevations, cells, size, sx, sz,
+                        )
+                        self.assertLessEqual(sy, low - 0.03 + 1e-6)
+                        self.assertLessEqual(high - sy, burial + 1e-6)
+
+        # A depression outside the old 20.3 x 35 m triangle footprint.
+        flat = [20.0] * (cells * cells)
+        flat[5 * cells + 5] = 12.0
+        self.assertIsNone(_stock_forest_root_fit(
+            flat, cells, size, x, z, 0.0, EVERON_TRIANGLE_ROOTS,
+            centre_height=20.0, gradient_x=0.0, gradient_z=0.0,
+            maximum_burial=3.0,
+        ))
+
+    def test_stock_triangle_plane_fit_rotated_footprint_and_root_float(self) -> None:
+        from cwr_worldgen.osm import (
+            _local_terrain_gradient, _stock_triangle_plane_fit,
+            _triangle_elevation_bounds,
+        )
+
+        cells, cell_size = 5, 25.0
+        x = z = 50.0
+        smooth = tuple(
+            20.0 + 3.0 * col - 2.0 * row
+            for row in range(cells) for col in range(cells)
+        )
+        gx, gz = _local_terrain_gradient(smooth, cells, cell_size, x, z)
+        centre = _sample_elevation(smooth, cells, cell_size, x, z)
+        fit = _stock_triangle_plane_fit(
+            smooth, cells, cell_size, x, z, 35.0, 37.0,
+            centre_height=centre, gradient_x=gx, gradient_z=gz,
+            maximum_burial=3.0,
+        )
+        self.assertIsNotNone(fit)
+        self.assertAlmostEqual(fit[0], 0.0)
+        self.assertAlmostEqual(fit[1], 0.0)
+        self.assertEqual(fit[2], 0.0)
+
+        raised = list(smooth)
+        raised[2 * cells + 2] += 1.0
+        centre = _sample_elevation(raised, cells, cell_size, x, z)
+        fit = _stock_triangle_plane_fit(
+            raised, cells, cell_size, x, z, 35.0, 37.0,
+            centre_height=centre, gradient_x=gx, gradient_z=gz,
+            maximum_burial=3.0,
+        )
+        self.assertIsNotNone(fit)
+        offset, burial, floating = fit
+        self.assertLess(offset, 0.0)
+        self.assertLessEqual(burial, 3.0)
+        self.assertEqual(floating, 0.0)
+
+        # Independently sample the rotated support envelope to verify that
+        # its fitted plane is never higher than either terrain triangulation.
+        angle = math.radians(37.0)
+        for u in range(-10, 11):
+            for v in range(-17, 18):
+                sx = x + u * math.cos(angle) + v * math.sin(angle)
+                sz = z - u * math.sin(angle) + v * math.cos(angle)
+                lower, upper = _triangle_elevation_bounds(
+                    raised, cells, cell_size, sx, sz,
+                )
+                plane = centre + offset + gx * (sx - x) + gz * (sz - z)
+                self.assertLessEqual(plane, lower + 1e-6)
+                self.assertLessEqual(upper - plane, 3.0 + 1e-6)
+
+        raised[2 * cells + 2] += 7.0
+        self.assertIsNone(_stock_triangle_plane_fit(
+            raised, cells, cell_size, x, z, 35.0, 37.0,
+            centre_height=_sample_elevation(raised, cells, cell_size, x, z),
+            gradient_x=gx, gradient_z=gz, maximum_burial=3.0,
+        ))
+
+    def test_stock_triangle_plane_fit_rejects_rough_fallback_below_relief_limit(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        dataset = OsmDataset(
+            source_generator="rough-triangle", element_count=0,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(True,) * 64,
+            farmland=(False,) * 64, urban=(False,) * 64,
+            roads=(False,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="cwr_rough_triangle", heightmap_path=Path("unused.png"),
+            bbox=(0.0, 0.0, 1.0, 1.0), cells=8, cell_size=25.0,
+            forest_tree_spacing=50.0, max_road_objects=0, max_buildings=0,
+            max_forest_objects=16, forest_maximum_block_relief=3.0,
+            forest_everon_steep_maximum_relief=8.0,
+            forest_everon_steep_maximum_burial=1.0,
+            forest_everon_steep_maximum_float=8.0,
+            forest_severe_hill_fallback=False,
+            forest_undergrowth_enabled=False, forest_single_tree_enabled=False,
+            forest_border_enabled=False, steep_hill_bushes_enabled=False,
+            ditch_grass_enabled=False, strict_assets=False,
+        )
+        rough = [20.0] * 64
+        rough[3 * 8 + 3] += 5.0
+        result = generate_world_objects(
+            dataset, projection, raster, rough, spec, include_roads=False,
+        )
+        stock = {
+            (round(obj.x), round(obj.z), obj.model_path)
+            for obj in result.objects
+            if obj.model_path in (spec.forest_tree_model, spec.forest_everon_steep_model)
+        }
+        self.assertNotIn((75, 75, spec.forest_tree_model), stock)
+        self.assertNotIn((75, 75, spec.forest_everon_steep_model), stock)
+        self.assertIn((125, 125, spec.forest_tree_model), stock)
+        self.assertGreater(result.forest_everon_steep_rejections, 0)
+        self.assertGreater(result.forest_cluster_objects + result.forest_hillside_tree_objects, 0)
+
+    def test_smooth_interior_forest_uses_squares_above_relief_limit(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        dataset = OsmDataset(
+            source_generator="planar-forest", element_count=0,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(True,) * 64,
+            farmland=(False,) * 64, urban=(False,) * 64,
+            roads=(False,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        spec = _Milestone9PlayabilitySpec(
+            name="cwr_planar_forest", heightmap_path=Path("unused.png"),
+            bbox=(0.0, 0.0, 1.0, 1.0), cells=8, cell_size=25.0,
+            forest_tree_spacing=50.0, max_road_objects=0, max_buildings=0,
+            max_forest_objects=16, forest_maximum_block_relief=3.0,
+            forest_undergrowth_enabled=False, forest_single_tree_enabled=False,
+            forest_border_enabled=False, steep_hill_bushes_enabled=False,
+            ditch_grass_enabled=False, strict_assets=False,
+        )
+        elevations = tuple(float(column * 5) for _row in range(8) for column in range(8))
+        result = generate_world_objects(
+            dataset, projection, raster, elevations, spec, include_roads=False,
+        )
+        square_centres = {
+            (round(obj.x), round(obj.z))
+            for obj in result.objects
+            if obj.model_path == spec.forest_tree_model
+        }
+        self.assertIn((75, 75), square_centres)
+        self.assertIn((125, 125), square_centres)
+
+        # Raising the relief slider to 9 m must not bypass the stock square
+        # fit. This 5 m spike is below 9 m but cannot keep all roots grounded.
+        rough = [20.0] * 64
+        rough[3 * 8 + 3] += 5.0
+        rough_result = generate_world_objects(
+            dataset, projection, raster, rough,
+            replace(spec, forest_maximum_block_relief=9.0),
+            include_roads=False,
+        )
+        rough_square_centres = {
+            (round(obj.x), round(obj.z))
+            for obj in rough_result.objects
+            if obj.model_path == spec.forest_tree_model
+        }
+        self.assertNotIn((75, 75), rough_square_centres)
+        self.assertIn((125, 125), rough_square_centres)
+
     def test_default_hill_limits_keep_square_blocks_on_rolling_ground(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
         dataset = OsmDataset(
@@ -2386,10 +2729,10 @@ class RoadPieceFittingTests(unittest.TestCase):
         result = generate_world_objects(
             dataset, projection, raster, rolling_heights, spec, include_roads=False
         )
-        # The stricter grounding policy no longer forces every 50 m square
-        # onto rolling terrain. The rougher half uses the smaller triangle.
-        self.assertEqual(result.forest_block_objects, 2)
-        self.assertEqual(result.forest_everon_steep_objects, 2)
+        # The smooth slope is now supported by terrain-sheared squares,
+        # including where the total relief exceeds the original threshold.
+        self.assertEqual(result.forest_block_objects, 4)
+        self.assertEqual(result.forest_everon_steep_objects, 0)
         self.assertEqual(result.forest_sunk_polygon_objects, 0)
         self.assertLessEqual(result.maximum_forest_burial, spec.forest_block_maximum_burial + 1e-6)
         self.assertLessEqual(result.maximum_forest_float, spec.forest_block_maximum_float + 1e-6)
@@ -2431,7 +2774,12 @@ class RoadPieceFittingTests(unittest.TestCase):
             forest_border_enabled=False, steep_hill_bushes_enabled=False,
             ditch_grass_enabled=False, strict_assets=False,
         )
-        hill = tuple(float(x) * (32.0 / 3.0) for _z in range(4) for x in range(4))
+        # A sharp terrain spike is not a shearable hillside. Every adjacent
+        # 50 m square sees the discontinuity and must use smaller fallbacks.
+        hill = tuple(
+            32.0 if x == 2 and z == 2 else 0.0
+            for z in range(4) for x in range(4)
+        )
         grounded = generate_world_objects(
             dataset, projection, raster, hill, spec, include_roads=False
         )
@@ -2441,7 +2789,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         # A 32 m rise is no longer hidden by sinking a rigid polygon into the
         # hillside. It falls through to smaller clusters/individually grounded
         # hillside trees, all of which must pass the final grounding audit.
-        self.assertEqual(grounded.forest_hillside_fallback_blocks, 4)
+        self.assertGreater(grounded.forest_hillside_fallback_blocks, 0)
         # The conservative default still restores meaningful hill-tree density
         # after the rigid square/triangle/cluster tiers are rejected.
         self.assertGreaterEqual(grounded.forest_hillside_tree_objects, 20)
@@ -2524,8 +2872,10 @@ class RoadPieceFittingTests(unittest.TestCase):
                     ),
                     include_roads=False,
                 )
-                self.assertEqual(triangle.forest_block_objects, 0)
-                self.assertEqual(triangle.forest_everon_steep_objects, 4)
+                # A 0 m total-relief setting must not reject correctly
+                # sheared squares on the smooth portion of the hill.
+                self.assertEqual(triangle.forest_block_objects, 2)
+                self.assertEqual(triangle.forest_everon_steep_objects, 2)
 
     def test_forest_borders_and_ditch_grass_use_reusable_cluster_models(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)

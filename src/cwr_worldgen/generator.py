@@ -3783,10 +3783,9 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    # Everon uses the same stock Data3D T1 pivot as Kolgujev. The previous
-    # cache stored forest blocks at ground Y, burying their proxy trunks.
-    # Invalidate cached nonroad positions when correcting those stock pivots.
-    key = cache_key("nonroad-object-placement-v99-everon-stock-forest-pivots", payload)
+    # Stock Everon squares and triangles now fit measured P3D root samples.
+    # Old nominal-footprint placements must not bypass this grounding pass.
+    key = cache_key("nonroad-object-placement-v103-everon-measured-roots", payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
