@@ -3720,56 +3720,79 @@ def _square_elevation_samples(
     return tuple(values)
 
 
-def _stock_square_plane_offset(
+def _stock_square_plane_fit(
     elevations: Sequence[float], cells: int, cell_size: float,
     x: float, z: float, size: float, *,
     centre_height: float, gradient_x: float, gradient_z: float,
-    maximum_burial: float, maximum_float: float,
-) -> float | None:
-    """Fit a terrain-sheared stock square to the actual ground, not total relief.
+    maximum_burial: float,
+) -> tuple[float, float, float] | None:
+    """Fit the stock square's nominal root plane with zero positive float.
 
-    Smooth hills can rise much more than the square relief threshold without
-    floating a stock tree proxy: the model's terrain shear follows the plane.
-    Sample terrain-grid intersections and both possible triangle diagonals to
-    reject curved or broken terrain instead. A small vertical correction is
-    allowed only within the existing burial/float limits.
+    A smooth slope is not in itself a reason to reject a terrain-sheared
+    forest. Curvature, steps and saddles are: both possible RVW4 triangle
+    surfaces must fit within the burial budget, without lifting roots off
+    the lower surface. This is a nominal footprint check, not a measurement
+    of the actual embedded stock P3D tree geometry.
     """
     half = size * 0.5
     limit = cells * cell_size - 0.001
     minimum_x, maximum_x = max(0.0, x - half), min(limit, x + half)
     minimum_z, maximum_z = max(0.0, z - half), min(limit, z + half)
-    xs = sorted(set(
-        _terrain_axis_breakpoints(minimum_x, maximum_x, cells, cell_size)
-        + _terrain_patch_centres(minimum_x, maximum_x, cells, cell_size)
-        + (x,)
-    ))
-    zs = sorted(set(
-        _terrain_axis_breakpoints(minimum_z, maximum_z, cells, cell_size)
-        + _terrain_patch_centres(minimum_z, maximum_z, cells, cell_size)
-        + (z,)
-    ))
+    grid_x = _terrain_axis_breakpoints(minimum_x, maximum_x, cells, cell_size)
+    grid_z = _terrain_axis_breakpoints(minimum_z, maximum_z, cells, cell_size)
+    # Grid intersections (including the footprint corners) and intersections
+    # of either implicit diagonal with the footprint boundary give the extrema
+    # of the piecewise-planar terrain minus the model's world-space plane.
+    points = {(sx, sz) for sx in grid_x for sz in grid_z}
+    points.add((x, z))
+    for sx in (minimum_x, maximum_x):
+        patch_x = int(math.floor(sx / cell_size))
+        if patch_x >= cells - 1:
+            continue
+        fraction = sx - patch_x * cell_size
+        for lo, hi in zip(grid_z, grid_z[1:]):
+            patch_z = int(math.floor((lo + hi) * 0.5 / cell_size))
+            if patch_z >= cells - 1:
+                continue
+            for dz in (fraction, cell_size - fraction):
+                sz = patch_z * cell_size + dz
+                if lo < sz < hi:
+                    points.add((sx, sz))
+    for sz in (minimum_z, maximum_z):
+        patch_z = int(math.floor(sz / cell_size))
+        if patch_z >= cells - 1:
+            continue
+        fraction = sz - patch_z * cell_size
+        for lo, hi in zip(grid_x, grid_x[1:]):
+            patch_x = int(math.floor((lo + hi) * 0.5 / cell_size))
+            if patch_x >= cells - 1:
+                continue
+            for dx in (fraction, cell_size - fraction):
+                sx = patch_x * cell_size + dx
+                if lo < sx < hi:
+                    points.add((sx, sz))
     minimum_residual = float("inf")
     maximum_residual = float("-inf")
-    for sample_x in xs:
-        for sample_z in zs:
-            lower, upper = _triangle_elevation_bounds(
-                elevations, cells, cell_size, sample_x, sample_z,
-            )
-            plane = (
-                centre_height
-                + gradient_x * (sample_x - x)
-                + gradient_z * (sample_z - z)
-            )
-            minimum_residual = min(minimum_residual, lower - plane)
-            maximum_residual = max(maximum_residual, upper - plane)
-            if maximum_residual - minimum_residual > maximum_burial + maximum_float + 1e-6:
-                return None
-    minimum_offset = maximum_residual - maximum_burial
-    maximum_offset = minimum_residual + maximum_float
-    if minimum_offset > maximum_offset + 1e-6:
+    for sample_x, sample_z in points:
+        lower, upper = _triangle_elevation_bounds(
+            elevations, cells, cell_size, sample_x, sample_z,
+        )
+        plane = (
+            centre_height
+            + gradient_x * (sample_x - x)
+            + gradient_z * (sample_z - z)
+        )
+        minimum_residual = min(minimum_residual, lower - plane)
+        maximum_residual = max(maximum_residual, upper - plane)
+        if maximum_residual - minimum_residual > maximum_burial + 1e-6:
+            return None
+    # Use the highest non-floating plane. A small downward adjustment is
+    # preferable to airborne roots, but never exceed the burial budget.
+    offset = min(0.0, minimum_residual)
+    burial = max(0.0, maximum_residual - offset)
+    if burial > maximum_burial + 1e-6:
         return None
-    # Keep the stock origin on its original plane when it already fits.
-    return max(minimum_offset, min(0.0, maximum_offset))
+    return offset, burial, 0.0
 
 
 def _non_buried_vegetation_anchor(
@@ -9871,20 +9894,19 @@ def generate_world_objects(
                         elevations, spec.cells, spec.cell_size, x, z,
                     )
                     if math.hypot(stock_gradient_x, stock_gradient_z) <= EVERON_FOREST_MAXIMUM_SHEAR:
-                        # Keep the original relief-based acceptance, but give
-                        # smooth hillsides a second chance using the shear plane.
-                        plane_offset = (
-                            0.0 if relief <= maximum_allowed_relief
-                            else _stock_square_plane_offset(
-                                elevations, spec.cells, spec.cell_size, x, z, spacing,
-                                centre_height=centre_height,
-                                gradient_x=stock_gradient_x,
-                                gradient_z=stock_gradient_z,
-                                maximum_burial=block_maximum_burial,
-                                maximum_float=block_maximum_float,
-                            )
+                        # Every stock square must pass the plane check, even
+                        # when total relief is below the user-configured limit.
+                        # For sheared squares the relief budget applies to
+                        # deviations from the plane, not the height of a slope.
+                        plane_fit = _stock_square_plane_fit(
+                            elevations, spec.cells, spec.cell_size, x, z, spacing,
+                            centre_height=centre_height,
+                            gradient_x=stock_gradient_x,
+                            gradient_z=stock_gradient_z,
+                            maximum_burial=min(block_maximum_burial, maximum_allowed_relief),
                         )
-                        if plane_offset is not None:
+                        if plane_fit is not None:
+                            plane_offset, burial, floating = plane_fit
                             stock_y = (
                                 centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES
                                 + plane_offset
@@ -9901,6 +9923,8 @@ def generate_world_objects(
                             forest_count += 1
                             forest_block_objects += 1
                             mark_accepted_forest(x, z, spacing * 0.58)
+                            maximum_forest_burial = max(maximum_forest_burial, burial)
+                            maximum_forest_float = max(maximum_forest_float, floating)
                             continue
 
                 if not low_anchor and not everon_stock_forest:
