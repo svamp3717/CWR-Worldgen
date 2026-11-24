@@ -2375,7 +2375,7 @@ class RoadPieceFittingTests(unittest.TestCase):
 
     def test_stock_square_plane_fit_accepts_smooth_slope_not_sharp_ridge(self) -> None:
         from cwr_worldgen.osm import (
-            _local_terrain_gradient, _stock_square_plane_offset,
+            _local_terrain_gradient, _stock_square_plane_fit,
         )
 
         cells, cell_size = 5, 25.0
@@ -2386,27 +2386,44 @@ class RoadPieceFittingTests(unittest.TestCase):
         )
         self.assertAlmostEqual(gradient_x, 0.2)
         self.assertAlmostEqual(gradient_z, 0.0)
-        offset = _stock_square_plane_offset(
+        fit = _stock_square_plane_fit(
             smooth, cells, cell_size, x, z, 50.0,
             centre_height=_sample_elevation(smooth, cells, cell_size, x, z),
             gradient_x=gradient_x, gradient_z=gradient_z,
-            maximum_burial=2.0, maximum_float=0.2,
+            maximum_burial=2.0,
         )
         # The slope rises 10 m over 50 m, far beyond the default 3 m
         # relief limit, but perfectly follows the stock model's shear plane.
-        self.assertIsNotNone(offset)
-        self.assertAlmostEqual(offset, 0.0)
+        self.assertIsNotNone(fit)
+        self.assertAlmostEqual(fit[0], 0.0)
+        self.assertAlmostEqual(fit[1], 0.0)
+        self.assertEqual(fit[2], 0.0)
+
+        # A small depression can fit only if the entire nominal root plane
+        # is lowered. The old fit allowed a positive floating tolerance.
+        shallow = list(smooth)
+        shallow[1 * cells + 1] -= 0.5
+        fit = _stock_square_plane_fit(
+            shallow, cells, cell_size, x, z, 50.0,
+            centre_height=_sample_elevation(shallow, cells, cell_size, x, z),
+            gradient_x=gradient_x, gradient_z=gradient_z,
+            maximum_burial=2.0,
+        )
+        self.assertIsNotNone(fit)
+        self.assertAlmostEqual(fit[0], -0.5)
+        self.assertAlmostEqual(fit[1], 0.5)
+        self.assertEqual(fit[2], 0.0)
 
         broken = list(smooth)
         broken[2 * cells + 2] += 8.0
         gradient_x, gradient_z = _local_terrain_gradient(
             broken, cells, cell_size, x, z,
         )
-        self.assertIsNone(_stock_square_plane_offset(
+        self.assertIsNone(_stock_square_plane_fit(
             broken, cells, cell_size, x, z, 50.0,
             centre_height=_sample_elevation(broken, cells, cell_size, x, z),
             gradient_x=gradient_x, gradient_z=gradient_z,
-            maximum_burial=2.0, maximum_float=0.2,
+            maximum_burial=2.0,
         ))
 
     def test_smooth_interior_forest_uses_squares_above_relief_limit(self) -> None:
@@ -2441,6 +2458,23 @@ class RoadPieceFittingTests(unittest.TestCase):
         }
         self.assertIn((75, 75), square_centres)
         self.assertIn((125, 125), square_centres)
+
+        # Raising the relief slider to 9 m must not bypass the stock square
+        # fit. This 5 m spike is below 9 m but cannot keep all roots grounded.
+        rough = [20.0] * 64
+        rough[3 * 8 + 3] += 5.0
+        rough_result = generate_world_objects(
+            dataset, projection, raster, rough,
+            replace(spec, forest_maximum_block_relief=9.0),
+            include_roads=False,
+        )
+        rough_square_centres = {
+            (round(obj.x), round(obj.z))
+            for obj in rough_result.objects
+            if obj.model_path == spec.forest_tree_model
+        }
+        self.assertNotIn((75, 75), rough_square_centres)
+        self.assertIn((125, 125), rough_square_centres)
 
     def test_default_hill_limits_keep_square_blocks_on_rolling_ground(self) -> None:
         projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 100.0)
