@@ -3783,10 +3783,9 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    # Stock Everon square placement now checks the terrain-sheared plane
-    # after a total-relief rejection. Old cached triangles must be rebuilt
-    # even when the user has not changed any forest settings.
-    key = cache_key("nonroad-object-placement-v100-everon-square-plane-fit", payload)
+    # Every stock Everon square must pass the zero-float nominal plane fit.
+    # Invalidate placements from the earlier permissive slope/relief pass.
+    key = cache_key("nonroad-object-placement-v101-everon-square-zero-float", payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
