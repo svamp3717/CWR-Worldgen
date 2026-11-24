@@ -30,10 +30,12 @@ from cwr_worldgen.milestone9 import (
     MALDEN_ROADSIDE_TREE_MODELS,
     MALDEN_SINGLE_TREE_MODEL,
     NOGOVA_BUSH_MODELS,
+    NOGOVA_LEAF_FOREST_STEEP_MODEL,
     NOGOVA_LEAF_HILLSIDE_TREE_MODEL,
     NOGOVA_LEAF_ROADSIDE_TREE_MODEL,
     NOGOVA_LEAF_ROADSIDE_TREE_MODELS,
     NOGOVA_LEAF_SINGLE_TREE_MODEL,
+    NOGOVA_PINE_FOREST_STEEP_MODEL,
     NOGOVA_PINE_HILLSIDE_TREE_MODEL,
     NOGOVA_PINE_ROADSIDE_TREE_MODEL,
     NOGOVA_PINE_ROADSIDE_TREE_MODELS,
@@ -615,6 +617,8 @@ class SurfacePassTests(unittest.TestCase):
             forest_tree_model=r"o\tree\les_nw_ctver_pruhozi_T1.p3d",
         )
         resolved = _resolved_forest_profile_models(spec)
+        self.assertEqual(resolved["forest_tree_model"], spec.forest_tree_model)
+        self.assertEqual(resolved["forest_everon_steep_model"], NOGOVA_LEAF_FOREST_STEEP_MODEL)
         self.assertEqual(resolved["forest_single_tree_model"], NOGOVA_LEAF_SINGLE_TREE_MODEL)
         self.assertEqual(resolved["forest_roadside_tree_model"], NOGOVA_LEAF_ROADSIDE_TREE_MODEL)
         self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), NOGOVA_LEAF_ROADSIDE_TREE_MODELS)
@@ -682,6 +686,8 @@ class SurfacePassTests(unittest.TestCase):
             forest_tree_model=r"o\tree\les_nw_jehl_ctver_pruhozi.p3d",
         )
         resolved = _resolved_forest_profile_models(spec)
+        self.assertEqual(resolved["forest_tree_model"], spec.forest_tree_model)
+        self.assertEqual(resolved["forest_everon_steep_model"], NOGOVA_PINE_FOREST_STEEP_MODEL)
         self.assertEqual(resolved["forest_single_tree_model"], NOGOVA_PINE_SINGLE_TREE_MODEL)
         self.assertEqual(resolved["forest_roadside_tree_model"], NOGOVA_PINE_ROADSIDE_TREE_MODEL)
         self.assertEqual(tuple(resolved["forest_roadside_tree_models"]), NOGOVA_PINE_ROADSIDE_TREE_MODELS)
@@ -694,6 +700,73 @@ class SurfacePassTests(unittest.TestCase):
         )
         self.assertTrue(all(path.casefold().startswith("o\\tree" + "\\") for path in tree_paths))
         self.assertFalse(any(path.casefold().startswith("data3d" + "\\") for path in tree_paths))
+
+    def test_nogova_forest_fallback_preserves_explicit_custom_models(self) -> None:
+        for primary, triangle in (
+            (r"o\tree\les_nw_ctver_pruhozi_T1.p3d", NOGOVA_LEAF_FOREST_STEEP_MODEL),
+            (r"o\tree\les_nw_jehl_ctver_pruhozi.p3d", NOGOVA_PINE_FOREST_STEEP_MODEL),
+        ):
+            for explicit in (triangle, r"custom\forest_triangle.p3d", ""):
+                with self.subTest(primary=primary, explicit=explicit):
+                    spec = Milestone9Spec(
+                        source_dir=Path("unused"), forest_profile="everon",
+                        forest_tree_model=primary, forest_everon_steep_model=explicit,
+                    )
+                    self.assertEqual(
+                        _resolved_forest_profile_models(spec)["forest_everon_steep_model"],
+                        explicit,
+                    )
+
+    def test_nogova_forest_fallback_emits_matching_stock_polygon_family(self) -> None:
+        projection = BboxProjection.create((0.0, 0.0, 1.0, 1.0), 200.0)
+        dataset = OsmDataset(
+            source_generator="nogova-polygon-family", element_count=0,
+            coastlines=(), water=(), forests=(), farmland=(), urban=(), roads=(),
+        )
+        raster = OsmRaster(
+            cells=8, water=(False,) * 64, forest=(True,) * 64,
+            farmland=(False,) * 64, urban=(False,) * 64,
+            roads=(False,) * 64, buildings=(False,) * 64,
+            high_resolution=8, coastline_seed_count=0,
+        )
+        # A 2 m rise per 25 m sample exceeds the 3 m square relief budget
+        # across interior 50 m cells but fits the smaller triangle envelope.
+        elevations = tuple(float(col * 2) for row in range(8) for col in range(8))
+        for primary, triangle in (
+            (r"o\tree\les_nw_ctver_pruhozi_T1.p3d", NOGOVA_LEAF_FOREST_STEEP_MODEL),
+            (r"o\tree\les_nw_jehl_ctver_pruhozi.p3d", NOGOVA_PINE_FOREST_STEEP_MODEL),
+        ):
+            with self.subTest(primary=primary):
+                source = Milestone9Spec(
+                    source_dir=Path("unused"), forest_profile="everon",
+                    forest_tree_model=primary,
+                )
+                resolved = _resolved_forest_profile_models(source)
+                spec = _Milestone9PlayabilitySpec(
+                    name="cwr_nogova_family", heightmap_path=Path("unused.png"),
+                    bbox=(0.0, 0.0, 1.0, 1.0), cells=8, cell_size=25.0,
+                    forest_profile="everon", forest_tree_spacing=50.0,
+                    max_road_objects=0, max_buildings=0, max_forest_objects=32,
+                    forest_maximum_block_relief=3.0,
+                    forest_everon_steep_maximum_relief=8.0,
+                    forest_undergrowth_enabled=False, forest_single_tree_enabled=False,
+                    forest_border_enabled=False, steep_hill_bushes_enabled=False,
+                    ditch_grass_enabled=False, rural_vegetation_enabled=False,
+                    strict_assets=False, **resolved,
+                )
+                result = generate_world_objects(
+                    dataset, projection, raster, elevations, spec, include_roads=False,
+                )
+                polygons = {
+                    obj.model_path.casefold() for obj in result.objects
+                    if "les" in obj.model_path.casefold()
+                    and ("ctver" in obj.model_path.casefold()
+                         or "trojuhelnik" in obj.model_path.casefold())
+                }
+                # Require an actual emitted matching triangle, rather than
+                # allowing an empty result to satisfy the no-Data3D assertion.
+                self.assertIn(triangle.casefold(), polygons)
+                self.assertTrue(polygons <= {primary.casefold(), triangle.casefold()})
 
     def test_kolgujev_surface_profile_uses_stock_cain_roles(self) -> None:
         paths = surface_texture_wire_paths("cwr_cain", "kolgujev")

@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "src/cwr_worldgen/osm.py"
+      - "src/cwr_worldgen/milestone9.py"
       - "src/cwr_worldgen/stock_forest_roots.py"
       - "tests/test_milestone9.py"
       - ".github/workflows/everon-forest-grounding.yml"
@@ -31,7 +32,7 @@ jobs:
           python -m pip install -e . pytest
       - name: Test Everon square and triangle forest grounding
         run: |
-          python -m pytest -q tests/test_milestone9.py -k 'everon_stock_forest_origin_is_not_ground_level or milestone9_forest_ladder_uses_terrain_fit_and_reusable_clusters or no_forest_polygon_mode_replaces_stock_blocks_with_cluster_tiles or everon_forests_gain_extra_single_trees or stock_square_plane_fit_accepts_smooth_slope_not_sharp_ridge or stock_triangle_plane_fit or stock_forest_measured_root_fit or smooth_interior_forest_uses_squares_above_relief_limit or default_hill_limits_keep_square_blocks_on_rolling_ground or 32_metre_hill_uses_sunk_polygon_before_individual_tree_fallback or 35_and_43_metre_hills_allow_configured_polygon_tiers'
+          python -m pytest -q tests/test_milestone9.py -k 'everon_stock_forest_origin_is_not_ground_level or milestone9_forest_ladder_uses_terrain_fit_and_reusable_clusters or no_forest_polygon_mode_replaces_stock_blocks_with_cluster_tiles or everon_forests_gain_extra_single_trees or stock_square_plane_fit_accepts_smooth_slope_not_sharp_ridge or stock_triangle_plane_fit or stock_forest_measured_root_fit or smooth_interior_forest_uses_squares_above_relief_limit or default_hill_limits_keep_square_blocks_on_rolling_ground or 32_metre_hill_uses_sunk_polygon_before_individual_tree_fallback or 35_and_43_metre_hills_allow_configured_polygon_tiers or nogova_leaf_blocks_resolve or nogova_pine_blocks_resolve or nogova_forest_fallback'
       - name: Check forest geometry and WRP serialization
         run: |
           python -m pytest -q tests/test_forest_undergrowth_textures.py tests/test_procedural_forests.py
