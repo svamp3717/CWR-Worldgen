@@ -20,6 +20,7 @@ from .cache import CACHE_SCHEMA_VERSION, atomic_write_bytes, cache_key, streamin
 from .building_semantics import is_actual_church
 from .fence_openings import fence_opening_chunk_indices
 from .model import OsmSpec, TerrainShearedWorldObject, WorldObject
+from .stock_forest_roots import EVERON_T1_ROOTS, EVERON_TRIANGLE_ROOTS
 from .network import (
     OVERPASS_RATE_LIMIT_BACKOFF_SECONDS,
     OVERPASS_REFERER,
@@ -3838,6 +3839,49 @@ def _stock_triangle_plane_fit(
     if burial > maximum_burial + 1e-6:
         return None
     return offset, burial, 0.0
+
+
+def _stock_forest_root_fit(
+    elevations: Sequence[float], cells: int, cell_size: float,
+    x: float, z: float, heading: float,
+    roots: Sequence[tuple[float, float, float]], *,
+    centre_height: float, gradient_x: float, gradient_z: float,
+    maximum_burial: float, maximum_plane_relief: float | None = None,
+) -> tuple[float, float, float] | None:
+    """Ground measured stock forest root samples with the actual WRP transform.
+
+    Return (origin Y, maximum burial, maximum float). Keep the nominal
+    stock origin as an upper bound and lower it just enough that every
+    measured root is below both possible terrain surfaces. A 3 cm margin
+    allows for the 5 cm RVW4 height quantization and millimetre calibration.
+    The square's relief limit applies to terrain deviation from its shear
+    plane, independently of the model's own varying root heights.
+    """
+    angle = math.radians(heading)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    minimum_anchor = float("-inf")
+    maximum_anchor = centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES
+    minimum_residual, maximum_residual = 0.0, 0.0
+    for local_x, local_y, local_z in roots:
+        dx = cosine * local_x + sine * local_z
+        dz = -sine * local_x + cosine * local_z
+        shear = gradient_x * dx + gradient_z * dz
+        lower, upper = _triangle_elevation_bounds(
+            elevations, cells, cell_size, x + dx, z + dz,
+        )
+        minimum_residual = min(minimum_residual, lower - centre_height - shear)
+        maximum_residual = max(maximum_residual, upper - centre_height - shear)
+        if (
+            maximum_plane_relief is not None
+            and maximum_residual - minimum_residual > maximum_plane_relief + 1e-6
+        ):
+            return None
+        relative_y = local_y + shear
+        minimum_anchor = max(minimum_anchor, upper - relative_y)
+        maximum_anchor = min(maximum_anchor, lower - relative_y - 0.03)
+        if minimum_anchor - maximum_anchor > maximum_burial + 1e-6:
+            return None
+    return maximum_anchor, max(0.0, minimum_anchor - maximum_anchor), 0.0
 
 
 def _non_buried_vegetation_anchor(
@@ -9939,23 +9983,19 @@ def generate_world_objects(
                         elevations, spec.cells, spec.cell_size, x, z,
                     )
                     if math.hypot(stock_gradient_x, stock_gradient_z) <= EVERON_FOREST_MAXIMUM_SHEAR:
-                        # Every stock square must pass the plane check, even
-                        # when total relief is below the user-configured limit.
-                        # For sheared squares the relief budget applies to
-                        # deviations from the plane, not the height of a slope.
-                        plane_fit = _stock_square_plane_fit(
-                            elevations, spec.cells, spec.cell_size, x, z, spacing,
+                        # Ground the actual measured model-local tree bases,
+                        # not an assumed square or uniformly flat root plane.
+                        root_fit = _stock_forest_root_fit(
+                            elevations, spec.cells, spec.cell_size,
+                            x, z, heading, EVERON_T1_ROOTS,
                             centre_height=centre_height,
                             gradient_x=stock_gradient_x,
                             gradient_z=stock_gradient_z,
-                            maximum_burial=min(block_maximum_burial, maximum_allowed_relief),
+                            maximum_burial=block_maximum_burial,
+                            maximum_plane_relief=maximum_allowed_relief,
                         )
-                        if plane_fit is not None:
-                            plane_offset, burial, floating = plane_fit
-                            stock_y = (
-                                centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES
-                                + plane_offset
-                            )
+                        if root_fit is not None:
+                            stock_y, burial, floating = root_fit
                             emit(
                                 TerrainShearedWorldObject(
                                     next_id, spec.forest_tree_model,
@@ -10073,20 +10113,16 @@ def generate_world_objects(
                     ):
                         if stock_everon_triangle:
                             if math.hypot(gradient_x, gradient_z) <= EVERON_FOREST_MAXIMUM_SHEAR:
-                                plane_fit = _stock_triangle_plane_fit(
+                                # The stock triangle's measured root extent
+                                # is nearly 50 m, not the nominal 35 m envelope.
+                                steep_fit = _stock_forest_root_fit(
                                     elevations, spec.cells, spec.cell_size,
-                                    x, z, everon_steep_footprint, heading,
+                                    x, z, heading, EVERON_TRIANGLE_ROOTS,
                                     centre_height=centre_height,
                                     gradient_x=gradient_x,
                                     gradient_z=gradient_z,
                                     maximum_burial=everon_steep_maximum_burial,
                                 )
-                                if plane_fit is not None:
-                                    offset, burial, floating = plane_fit
-                                    steep_fit = (
-                                        centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES + offset,
-                                        burial, floating,
-                                    )
                         else:
                             steep_fit = _terrain_fit_anchor(
                                 steep_supports,
@@ -10096,8 +10132,9 @@ def generate_world_objects(
                             )
                     if steep_fit is not None:
                         base_anchor, burial, floating = steep_fit
-                        # The stock P3D has its OWN lifted origin and upright
-                        # proxy trunks; do not apply generic polygon sinking.
+                        # Stock forest trunks are model geometry, not proxies.
+                        # The measured root fit includes their lifted origin;
+                        # do not apply generic polygon sinking on top of it.
                         sink_depth = (
                             steep_relief * polygon_sink_fraction
                             if (

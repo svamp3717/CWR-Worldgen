@@ -2179,7 +2179,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         # its child tree roots sit ~11.7 m below the WRP object origin.
         self.assertTrue(all(
             isinstance(obj, TerrainShearedWorldObject)
-            and abs(obj.y - EVERON_FOREST_ORIGIN_LIFT_METRES) < 1e-6
+            and abs(obj.y - (11.590 - 0.03)) < 1e-6
             for obj in flat.objects
         ))
 
@@ -2258,7 +2258,7 @@ class RoadPieceFittingTests(unittest.TestCase):
         for obj in flat.objects:
             self.assertIsInstance(obj, TerrainShearedWorldObject)
             self.assertAlmostEqual(
-                obj.y, 20.0 + EVERON_FOREST_ORIGIN_LIFT_METRES,
+                obj.y, 20.0 + 11.590 - 0.03,
                 places=5,
             )
             self.assertAlmostEqual(obj.terrain_shear_x, 0.0, places=5)
@@ -2427,6 +2427,57 @@ class RoadPieceFittingTests(unittest.TestCase):
             centre_height=_sample_elevation(broken, cells, cell_size, x, z),
             gradient_x=gradient_x, gradient_z=gradient_z,
             maximum_burial=2.0,
+        ))
+
+    def test_stock_forest_measured_root_fit_uses_actual_y_and_rotated_positions(self) -> None:
+        from cwr_worldgen.osm import _stock_forest_root_fit, _triangle_elevation_bounds
+        from cwr_worldgen.stock_forest_roots import EVERON_T1_ROOTS, EVERON_TRIANGLE_ROOTS
+
+        self.assertEqual(len(EVERON_T1_ROOTS), 125)
+        self.assertEqual(len(EVERON_TRIANGLE_ROOTS), 120)
+        self.assertGreater(max(abs(p[0]) for p in EVERON_TRIANGLE_ROOTS), 24.0)
+        self.assertGreater(max(p[2] for p in EVERON_TRIANGLE_ROOTS), 24.0)
+        cells, size = 9, 25.0
+        x = z = 100.0
+        gx, gz = 0.12, -0.08
+        elevations = tuple(
+            20.0 + gx * (col * size - x) + gz * (row * size - z)
+            for row in range(cells) for col in range(cells)
+        )
+        for roots in (EVERON_T1_ROOTS, EVERON_TRIANGLE_ROOTS):
+            for heading in (0.0, 37.0, 90.0, 180.0, 270.0):
+                with self.subTest(count=len(roots), heading=heading):
+                    fit = _stock_forest_root_fit(
+                        elevations, cells, size, x, z, heading, roots,
+                        centre_height=20.0, gradient_x=gx, gradient_z=gz,
+                        maximum_burial=2.0, maximum_plane_relief=0.0,
+                    )
+                    self.assertIsNotNone(fit)
+                    anchor, burial, floating = fit
+                    self.assertAlmostEqual(anchor, 20.0 - max(p[1] for p in roots) - 0.03)
+                    self.assertEqual(floating, 0.0)
+                    obj = TerrainShearedWorldObject(
+                        1, "stock.p3d", x, anchor, z, heading,
+                        terrain_shear_x=gx, terrain_shear_z=gz,
+                    )
+                    matrix = obj.matrix_4x3()
+                    for lx, ly, lz in roots:
+                        sx = obj.x + lx * matrix[0] + lz * matrix[6]
+                        sz = obj.z + lx * matrix[2] + lz * matrix[8]
+                        sy = obj.y + lx * matrix[1] + ly + lz * matrix[7]
+                        low, high = _triangle_elevation_bounds(
+                            elevations, cells, size, sx, sz,
+                        )
+                        self.assertLessEqual(sy, low - 0.03 + 1e-6)
+                        self.assertLessEqual(high - sy, burial + 1e-6)
+
+        # A depression outside the old 20.3 x 35 m triangle footprint.
+        flat = [20.0] * (cells * cells)
+        flat[5 * cells + 5] = 12.0
+        self.assertIsNone(_stock_forest_root_fit(
+            flat, cells, size, x, z, 0.0, EVERON_TRIANGLE_ROOTS,
+            centre_height=20.0, gradient_x=0.0, gradient_z=0.0,
+            maximum_burial=3.0,
         ))
 
     def test_stock_triangle_plane_fit_rotated_footprint_and_root_float(self) -> None:
