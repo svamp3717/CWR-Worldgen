@@ -2210,12 +2210,15 @@ class RoadPieceFittingTests(unittest.TestCase):
             dataset, projection, raster, steep_heights, spec, include_roads=False
         )
         # The finite terrain edge becomes flat beyond the final height sample.
-        # Only the squares with a genuinely planar support region are retained.
+        # The two interior squares still fit. The measured triangle roots extend
+        # outside the old relief envelope and also fail the burial budget at
+        # the edge, so those cells need the existing grounded fallback.
         self.assertEqual(steep.forest_block_objects, 2)
-        self.assertEqual(steep.forest_everon_steep_objects, 2)
-        self.assertEqual(steep.forest_cluster_objects, 0)
-        self.assertEqual(steep.forest_hillside_tree_objects, 0)
-        self.assertEqual(steep.forest_cluster_rejections, 0)
+        self.assertEqual(steep.forest_everon_steep_objects, 0)
+        self.assertGreaterEqual(steep.forest_everon_steep_rejections, 2)
+        self.assertGreaterEqual(steep.forest_hillside_fallback_blocks, 2)
+        self.assertGreater(steep.forest_cluster_objects + steep.forest_hillside_tree_objects, 0)
+        self.assertEqual(steep.vegetation_audit_violations, 0)
         self.assertLessEqual(steep.forest_cluster_maximum_burial, spec.forest_cluster_maximum_burial + 1e-6)
         self.assertLessEqual(steep.forest_cluster_maximum_float, spec.forest_cluster_maximum_float + 1e-6)
         repeated = generate_world_objects(
