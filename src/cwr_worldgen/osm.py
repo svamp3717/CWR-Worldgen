@@ -3069,6 +3069,8 @@ def _edge_ground_elevation_samples(
     end: PointXZ,
     x_breakpoints: Sequence[float],
     z_breakpoints: Sequence[float],
+    *,
+    sample_bounds: Callable[[Sequence[float], int, float, float, float], tuple[float, float]] = _triangle_elevation_bounds,
 ) -> tuple[float, ...]:
     dx = end[0] - start[0]
     dz = end[1] - start[1]
@@ -3113,7 +3115,7 @@ def _edge_ground_elevation_samples(
     return tuple(
         bound
         for parameter in parameters
-        for bound in _triangle_elevation_bounds(
+        for bound in sample_bounds(
             elevations,
             cells,
             cell_size,
@@ -3128,6 +3130,8 @@ def _polygon_ground_elevation_samples(
     cells: int,
     cell_size: float,
     polygon: Sequence[PointXZ],
+    *,
+    sample_bounds: Callable[[Sequence[float], int, float, float, float], tuple[float, float]] = _triangle_elevation_bounds,
 ) -> tuple[float, ...]:
     """Sample every arrangement vertex needed for exact triangle extrema."""
 
@@ -3163,7 +3167,7 @@ def _polygon_ground_elevation_samples(
     values = [
         bound
         for x, z in points
-        for bound in _triangle_elevation_bounds(
+        for bound in sample_bounds(
             elevations, cells, cell_size, x, z
         )
     ]
@@ -3177,6 +3181,7 @@ def _polygon_ground_elevation_samples(
                 end,
                 x_breakpoints,
                 z_breakpoints,
+                sample_bounds=sample_bounds,
             )
         )
     return tuple(values)
@@ -3790,6 +3795,46 @@ def _stock_square_plane_fit(
     # preferable to airborne roots, but never exceed the burial budget.
     offset = min(0.0, minimum_residual)
     burial = max(0.0, maximum_residual - offset)
+    if burial > maximum_burial + 1e-6:
+        return None
+    return offset, burial, 0.0
+
+
+def _stock_triangle_plane_fit(
+    elevations: Sequence[float], cells: int, cell_size: float,
+    x: float, z: float, footprint: float, heading: float, *,
+    centre_height: float, gradient_x: float, gradient_z: float,
+    maximum_burial: float,
+) -> tuple[float, float, float] | None:
+    """Fit the stock triangle's nominal root plane with zero positive float.
+
+    Use the same rotated rectangular support envelope as the existing
+    triangle relief check. At every terrain arrangement vertex, including
+    boundary crossings of both RVW4 diagonals, subtract the world-space
+    shear plane before measuring the grounding error. This is conservative
+    for the nominal footprint, not a per-proxy calibration of the P3D.
+    """
+    polygon = _oriented_rectangle(x, z, footprint * 0.58, footprint, heading)
+
+    def residual_bounds(
+        heights: Sequence[float], count: int, step: float,
+        sample_x: float, sample_z: float,
+    ) -> tuple[float, float]:
+        lower, upper = _triangle_elevation_bounds(
+            heights, count, step, sample_x, sample_z,
+        )
+        plane = (
+            centre_height
+            + gradient_x * (sample_x - x)
+            + gradient_z * (sample_z - z)
+        )
+        return lower - plane, upper - plane
+
+    residuals = _polygon_ground_elevation_samples(
+        elevations, cells, cell_size, polygon, sample_bounds=residual_bounds,
+    ) + residual_bounds(elevations, cells, cell_size, x, z)
+    offset = min(0.0, min(residuals))
+    burial = max(0.0, max(residuals) - offset)
     if burial > maximum_burial + 1e-6:
         return None
     return offset, burial, 0.0
@@ -10020,30 +10065,35 @@ def generate_world_objects(
                         and everon_steep_model.replace("/", "\\").casefold()
                         == KOLGUJEV_FOREST_TRIANGLE_MODEL.casefold()
                     )
-                    steep_fit = (
-                        (
-                            _sample_elevation(
-                                elevations, spec.cells, spec.cell_size, x, z
-                            ) + EVERON_FOREST_ORIGIN_LIFT_METRES,
-                            0.0, 0.0,
-                        )
-                        if stock_everon_triangle
-                        else _terrain_fit_anchor(
-                            steep_supports,
-                            clearance=spec.forest_ground_clearance,
-                            maximum_burial=everon_steep_maximum_burial,
-                            maximum_float=everon_steep_maximum_float,
-                        )
-                    ) if (
+                    steep_fit = None
+                    if (
                         everon_steep_model
                         and not triangle_blocked_by_road
                         and steep_relief <= everon_steep_maximum_relief
-                        and (
-                            not stock_everon_triangle
-                            or math.hypot(gradient_x, gradient_z)
-                            <= EVERON_FOREST_MAXIMUM_SHEAR
-                        )
-                    ) else None
+                    ):
+                        if stock_everon_triangle:
+                            if math.hypot(gradient_x, gradient_z) <= EVERON_FOREST_MAXIMUM_SHEAR:
+                                plane_fit = _stock_triangle_plane_fit(
+                                    elevations, spec.cells, spec.cell_size,
+                                    x, z, everon_steep_footprint, heading,
+                                    centre_height=centre_height,
+                                    gradient_x=gradient_x,
+                                    gradient_z=gradient_z,
+                                    maximum_burial=everon_steep_maximum_burial,
+                                )
+                                if plane_fit is not None:
+                                    offset, burial, floating = plane_fit
+                                    steep_fit = (
+                                        centre_height + EVERON_FOREST_ORIGIN_LIFT_METRES + offset,
+                                        burial, floating,
+                                    )
+                        else:
+                            steep_fit = _terrain_fit_anchor(
+                                steep_supports,
+                                clearance=spec.forest_ground_clearance,
+                                maximum_burial=everon_steep_maximum_burial,
+                                maximum_float=everon_steep_maximum_float,
+                            )
                     if steep_fit is not None:
                         base_anchor, burial, floating = steep_fit
                         # The stock P3D has its OWN lifted origin and upright

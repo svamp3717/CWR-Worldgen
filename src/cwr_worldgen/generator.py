@@ -3783,9 +3783,9 @@ def _load_nonroad_objects(
         "starting_object_id": starting_object_id,
         "spec": _spec_fields(spec, _PLACEMENT_CACHE_FIELDS),
     }
-    # Every stock Everon square must pass the zero-float nominal plane fit.
-    # Invalidate placements from the earlier permissive slope/relief pass.
-    key = cache_key("nonroad-object-placement-v101-everon-square-zero-float", payload)
+    # Stock Everon triangles now also require zero-float nominal plane fit.
+    # Rebuild cached placements from the earlier square-only grounding pass.
+    key = cache_key("nonroad-object-placement-v102-everon-triangle-zero-float", payload)
     path = cache_dir / "placements" / f"{key}.pickle" if cache_dir is not None else None
 
     def produce():
